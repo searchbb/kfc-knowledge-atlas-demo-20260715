@@ -10,12 +10,27 @@ const searchResults = document.getElementById("search-results");
 
 async function init() {
   const response = await fetch("./data/site-data.json");
-  state.data = await response.json();
+  state.data = normalizeData(await response.json());
   renderStats();
   renderTopicNav();
   bindSearch();
   window.addEventListener("hashchange", renderRoute);
   renderRoute();
+}
+
+function normalizeData(raw) {
+  const collections = raw.collections || {};
+  return {
+    ...raw,
+    topics: collections.topics || raw.topics || [],
+    issues: collections.issues || raw.issues || [],
+    cards: collections.cards || raw.cards || [],
+    research: collections.research || raw.research || [],
+    articles: collections.articles || raw.articles || [],
+    news: collections.news || raw.news || [],
+    relations: raw.relations || [],
+    timeline: raw.timeline || [],
+  };
 }
 
 function bindSearch() {

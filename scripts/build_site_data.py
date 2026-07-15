@@ -3,13 +3,16 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import unescape
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urlparse
 
 import markdown
+from portal_schema import PORTAL_SCHEMA_VERSION, schema_descriptor, validate_portal_payload
 
 
 TOPIC_SECTION_RE = re.compile(r"^## TOPIC: (?P<title>.+)$", re.MULTILINE)
@@ -23,6 +26,8 @@ SHADOW_ISSUE_RE = re.compile(
     r"^- issue_card_id:\s*(?P<issue_id>[^|]+)\|\s*articles:\s*(?P<articles>\d+)\s*\|\s*question:\s*(?P<question>.+)$",
     re.MULTILINE,
 )
+FRONT_MATTER_RE = re.compile(r"^---\n(?P<body>.*?)\n---\n", re.DOTALL)
+FRONT_MATTER_KV_RE = re.compile(r"^(?P<key>[A-Za-z0-9_]+):\s*(?P<value>.+)$")
 
 
 @dataclass
@@ -37,6 +42,16 @@ class Topic:
     active_issue_ids: list[str]
     related_card_ids: list[str]
     related_research_ids: list[str]
+
+
+def first_nonempty(*values: str | None) -> str:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
 
 
 def isoformat_from_mtime(path: Path) -> str:
@@ -56,6 +71,16 @@ def render_markdown(text: str) -> str:
     )
 
 
+def read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def section_body(text: str, heading: str) -> str:
     pattern = re.compile(
         rf"^##\s+{re.escape(heading)}\s*$" r"(?P<body>.*?)(?=^##\s+|\Z)",
@@ -72,6 +97,47 @@ def parse_int(value: str | None) -> int | None:
         return int(value)
     except ValueError:
         return None
+
+
+def parse_front_matter(raw: str) -> tuple[dict[str, str], str]:
+    match = FRONT_MATTER_RE.match(raw)
+    if not match:
+        return {}, raw
+    metadata: dict[str, str] = {}
+    for line in match.group("body").splitlines():
+        field = FRONT_MATTER_KV_RE.match(line.strip())
+        if not field:
+            continue
+        value = field.group("value").strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        metadata[field.group("key")] = value
+    return metadata, raw[match.end():]
+
+
+def summarize_markdown(raw: str, *, limit: int = 320) -> str:
+    _, body = parse_front_matter(raw)
+    body = re.sub(r"^#.*$", " ", body, flags=re.MULTILINE)
+    body = re.sub(r"^>.*$", " ", body, flags=re.MULTILINE)
+    body = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", body)
+    body = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", body)
+    body = body.replace("`", " ")
+    summary = re.sub(r"\s+", " ", body).strip()
+    return summary[:limit]
+
+
+def detect_source_id(*, metadata: dict[str, str], fallback_url: str = "") -> str:
+    source_id = first_nonempty(metadata.get("source_id"))
+    if source_id:
+        return source_id
+    source = first_nonempty(metadata.get("source"))
+    if source.startswith("http://") or source.startswith("https://"):
+        parsed = urlparse(source)
+        return parsed.netloc or source
+    if source:
+        return source
+    parsed = urlparse(fallback_url)
+    return parsed.netloc or "local_article"
 
 
 def parse_topic_registry(path: Path) -> list[Topic]:
@@ -194,6 +260,104 @@ def parse_research_report(path: Path) -> dict:
     }
 
 
+def parse_article_directory(path: Path) -> dict:
+    raw_path = path / "raw.md"
+    raw = raw_path.read_text(encoding="utf-8")
+    metadata, body = parse_front_matter(raw)
+    meta_json = read_json(path / "meta.json")
+    digest_meta = read_json(path / "digest_meta.json")
+    issue_meta = read_json(path / "issue_card_meta.json")
+    header = HEADER_RE.search(body)
+    title = first_nonempty(
+        metadata.get("title"),
+        str(meta_json.get("title") or ""),
+        str(digest_meta.get("title") or ""),
+        header.group("title").strip() if header else "",
+        path.name,
+    )
+    url = first_nonempty(
+        metadata.get("url"),
+        metadata.get("source_url"),
+        str(meta_json.get("source_url") or ""),
+    )
+    source_id = detect_source_id(metadata=metadata, fallback_url=url)
+    digest_status = str(digest_meta.get("status") or "").strip()
+    issue_status = str(issue_meta.get("status") or "").strip()
+    if digest_status == "success" and issue_status == "success":
+        status = "digested"
+    elif digest_status == "success":
+        status = "digest_ready"
+    else:
+        status = first_nonempty(issue_status, digest_status, "raw")
+    return {
+        "id": path.name,
+        "type": "article",
+        "title": title,
+        "sourceId": source_id,
+        "status": status,
+        "publishedAt": first_nonempty(
+            metadata.get("published_at"),
+            metadata.get("date"),
+            metadata.get("created"),
+            str(meta_json.get("prepared_at") or ""),
+            str(digest_meta.get("created_at") or ""),
+        ),
+        "updatedAt": first_nonempty(
+            str(issue_meta.get("created_at") or ""),
+            str(digest_meta.get("created_at") or ""),
+            str(meta_json.get("prepared_at") or ""),
+            isoformat_from_mtime(raw_path),
+        ),
+        "summary": summarize_markdown(raw),
+        "path": str(raw_path),
+        "url": url,
+    }
+
+
+def parse_news_rows(*, repo_root: Path, article_ids: set[str]) -> list[dict]:
+    db_path = repo_root / "data" / "news_library" / "news_library.sqlite3"
+    query = """
+        SELECT
+            article_id,
+            source_id,
+            title_zh,
+            title_original,
+            title_en,
+            canonical_url,
+            published_at,
+            first_seen_at,
+            digest_status,
+            digested_at,
+            last_seen_at,
+            summary_zh,
+            summary_original,
+            digest_result_summary
+        FROM news_articles
+        ORDER BY COALESCE(NULLIF(published_at, ''), first_seen_at) DESC, article_id
+    """
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(query).fetchall()
+    news_rows: list[dict] = []
+    for row in rows:
+        article_id = str(row["article_id"])
+        news_rows.append(
+            {
+                "id": article_id,
+                "type": "news",
+                "title": first_nonempty(row["title_zh"], row["title_original"], row["title_en"], article_id),
+                "sourceId": str(row["source_id"] or ""),
+                "status": first_nonempty(row["digest_status"], "new"),
+                "publishedAt": first_nonempty(row["published_at"], row["first_seen_at"]),
+                "updatedAt": first_nonempty(row["digested_at"], row["last_seen_at"], row["first_seen_at"]),
+                "summary": first_nonempty(row["summary_zh"], row["summary_original"], row["digest_result_summary"]),
+                "articleId": article_id if article_id in article_ids else "",
+                "url": str(row["canonical_url"] or ""),
+            }
+        )
+    return news_rows
+
+
 def research_candidates(base: Path) -> list[Path]:
     patterns = {
         "final_report.md",
@@ -257,6 +421,60 @@ def sort_timeline(items: Iterable[dict]) -> list[dict]:
     )
 
 
+def build_relations(
+    topics: list[dict],
+    issues: list[dict],
+    cards: list[dict],
+    research: list[dict],
+    articles: list[dict],
+    news: list[dict],
+) -> list[dict]:
+    relations: list[dict] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+
+    def add_relation(relation_type: str, from_type: str, from_id: str, to_type: str, to_id: str) -> None:
+        if not from_id or not to_id:
+            return
+        key = (relation_type, from_type, from_id, to_type, to_id)
+        if key in seen:
+            return
+        seen.add(key)
+        relations.append(
+            {
+                "id": f"{relation_type}:{from_id}:{to_id}",
+                "type": relation_type,
+                "fromType": from_type,
+                "fromId": from_id,
+                "toType": to_type,
+                "toId": to_id,
+            }
+        )
+
+    for topic in topics:
+        for issue_id in topic["issueIds"]:
+            add_relation("topic_issue_declared", "topic", topic["id"], "issue", issue_id)
+        for issue_id in topic["activeIssueIds"]:
+            add_relation("topic_issue_active", "topic", topic["id"], "issue", issue_id)
+        for card_id in topic["relatedCardIds"]:
+            add_relation("topic_card_related", "topic", topic["id"], "card", card_id)
+        for research_id in topic["relatedResearchIds"]:
+            add_relation("topic_research_related", "topic", topic["id"], "research", research_id)
+
+    for issue in issues:
+        add_relation("issue_topic_parent", "issue", issue["id"], "topic", issue.get("topicId") or "")
+    for card in cards:
+        add_relation("card_topic_parent", "card", card["id"], "topic", card.get("topicId") or "")
+    for item in research:
+        add_relation("research_topic_parent", "research", item["id"], "topic", item.get("topicId") or "")
+    article_ids = {item["id"] for item in articles}
+    for item in news:
+        article_id = item.get("articleId") or ""
+        if article_id in article_ids:
+            add_relation("news_article_materialized", "news", item["id"], "article", article_id)
+
+    return relations
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", required=True)
@@ -267,6 +485,7 @@ def main() -> None:
     out_path = Path(args.out).resolve()
     index_root = repo_root / "data/semantic_pipeline_v2/index"
     research_root = repo_root / "data/semantic_pipeline_v2/research_packs"
+    article_root = repo_root / "data/semantic_pipeline_v2/articles"
 
     topics = parse_topic_registry(index_root / "topic_registry.md")
     shadow = parse_shadow(index_root / "registry_shadow_active_cards.md")
@@ -283,6 +502,9 @@ def main() -> None:
 
     research_files = research_candidates(research_root)
     research = [parse_research_report(path) for path in research_files]
+    article_dirs = sorted(path for path in article_root.iterdir() if path.is_dir())
+    articles = [parse_article_directory(path) for path in article_dirs]
+    news = parse_news_rows(repo_root=repo_root, article_ids={item["id"] for item in articles})
 
     relate_assets(topics, issues, cards, research, shadow)
 
@@ -305,28 +527,81 @@ def main() -> None:
     active_issues = sum(1 for issue in issues if issue["status"] == "active")
     provisional_issues = sum(1 for issue in issues if issue["status"] == "provisional")
     latest_mtime = max(
-        [item["mtime"] for item in issues + cards + research],
+        [item.get("updatedAt") or item["mtime"] for item in issues + cards + research]
+        + [item.get("updatedAt") or "" for item in articles]
+        + [item.get("updatedAt") or "" for item in news],
         default=datetime.now(tz=timezone.utc).isoformat(),
     )
+    article_rows = articles
+    news_rows = news
+    relations = build_relations(topic_rows, issues, cards, research, article_rows, news_rows)
+    timeline = sort_timeline(
+        [
+            *issues,
+            *cards,
+            *research,
+            *[
+                {
+                    "id": item["id"],
+                    "type": item["type"],
+                    "title": item["title"],
+                    "topicId": None,
+                    "updatedAt": item["updatedAt"],
+                    "path": item["path"],
+                }
+                for item in article_rows
+            ],
+        ]
+    )[:120]
 
     payload = {
+        "schemaVersion": PORTAL_SCHEMA_VERSION,
         "generatedAt": datetime.now(tz=timezone.utc).isoformat(),
         "repoRoot": str(repo_root),
+        "schema": schema_descriptor(),
+        "buildMeta": {
+            "generator": "site-demo/scripts/build_site_data.py",
+            "sourceRoots": {
+                "index": str(index_root),
+                "research": str(research_root),
+                "articles": str(article_root),
+                "news_db": str(repo_root / "data" / "news_library" / "news_library.sqlite3"),
+            },
+            "notes": [
+                "Task 01 fixes the unified portal schema and validates the build output against it.",
+                "Task 02 wires article directories and the news library database into first-class portal collections.",
+            ],
+        },
         "stats": {
             "topics": len(topic_rows),
             "issues": len(issues),
             "cards": len(cards),
             "research": len(research),
+            "articles": len(article_rows),
+            "news": len(news_rows),
+            "relations": len(relations),
             "activeIssues": active_issues,
             "provisionalIssues": provisional_issues,
             "latestUpdate": latest_mtime,
+        },
+        "collections": {
+            "topics": topic_rows,
+            "issues": issues,
+            "cards": cards,
+            "research": research,
+            "articles": article_rows,
+            "news": news_rows,
         },
         "topics": topic_rows,
         "issues": issues,
         "cards": cards,
         "research": research,
-        "timeline": sort_timeline([*issues, *cards, *research])[:120],
+        "articles": article_rows,
+        "news": news_rows,
+        "relations": relations,
+        "timeline": timeline,
     }
+    validate_portal_payload(payload)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
