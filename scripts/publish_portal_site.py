@@ -105,15 +105,19 @@ def verify_public_site(
     sleep_seconds: int,
 ) -> dict[str, object]:
     index_url = pages_url
+    app_js_url = f"{pages_url.rstrip('/')}/app.js"
     site_data_url = f"{pages_url.rstrip('/')}/data/site-data.json"
     last_error = ""
     for attempt in range(1, attempts + 1):
         try:
             index_html = fetch_bytes(index_url)
+            app_js = fetch_bytes(app_js_url)
             site_data = fetch_bytes(site_data_url)
             remote_sha = sha256_bytes(site_data)
-            if b"site-data.json" not in index_html:
-                raise ValueError("index.html does not reference site-data.json")
+            if b'<script type="module" src="./app.js"></script>' not in index_html:
+                raise ValueError("index.html does not reference app.js")
+            if b'fetch("./data/site-data.json")' not in app_js:
+                raise ValueError("app.js does not fetch site-data.json")
             if remote_sha != expected_site_data_sha:
                 raise ValueError(
                     f"remote site-data sha mismatch: expected {expected_site_data_sha}, got {remote_sha}"
@@ -122,6 +126,7 @@ def verify_public_site(
                 "status": "passed",
                 "attempt": attempt,
                 "index_url": index_url,
+                "app_js_url": app_js_url,
                 "site_data_url": site_data_url,
                 "remote_site_data_sha256": remote_sha,
             }
@@ -133,6 +138,7 @@ def verify_public_site(
         "status": "failed",
         "attempt": attempts,
         "index_url": index_url,
+        "app_js_url": app_js_url,
         "site_data_url": site_data_url,
         "remote_site_data_sha256": "",
         "error": last_error,
