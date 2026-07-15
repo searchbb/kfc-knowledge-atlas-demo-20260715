@@ -149,7 +149,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Build, publish, and verify the KFC knowledge portal demo."
     )
-    parser.add_argument("--repo-root", default=str(find_repo_root()))
+    parser.add_argument("--repo-root", default="")
     parser.add_argument("--python-bin", default=default_python_bin())
     parser.add_argument("--pages-url", default="")
     parser.add_argument("--commit-message", default="")
@@ -159,7 +159,7 @@ def main() -> int:
     parser.add_argument("--verify-sleep-seconds", type=int, default=10)
     args = parser.parse_args()
 
-    repo_root = Path(args.repo_root).expanduser().resolve()
+    repo_root = Path(args.repo_root or str(find_repo_root())).expanduser().resolve()
     sync_result = sync_site_data(repo_root=repo_root, python_bin=args.python_bin)
     site_data_path = SITE_ROOT / "data" / "site-data.json"
     site_data_sha = sha256_file(site_data_path)

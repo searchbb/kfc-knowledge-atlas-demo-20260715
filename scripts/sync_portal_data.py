@@ -66,11 +66,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Rebuild portal site-data.json from local KFC truth sources."
     )
-    parser.add_argument("--repo-root", default=str(find_repo_root()))
+    parser.add_argument("--repo-root", default="")
     parser.add_argument("--out", default=str(SITE_ROOT / "data" / "site-data.json"))
     args = parser.parse_args()
 
-    repo_root = Path(args.repo_root).expanduser().resolve()
+    repo_root = Path(args.repo_root or str(find_repo_root())).expanduser().resolve()
     out_path = Path(args.out).expanduser().resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
