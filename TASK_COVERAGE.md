@@ -1,4 +1,4 @@
-# Portal Task Acceptance Coverage
+# Site Task Acceptance Coverage
 
 This matrix freezes implementation evidence for all 24 production tasks before the release-side-effect cases run. The final two release gates are closed only after the approved test runner publishes and verifies production.
 
@@ -21,10 +21,10 @@ This matrix freezes implementation evidence for all 24 production tasks before t
 | build metadata | build id, source digest/revision, generated time, counts shown | implemented, locally passed |
 | mail URL protocol | `portal_links.py` hash-route contract and runbook | implemented, locally passed |
 | digest mail links | rendered home/article/card links without sending mail | implemented, locally passed |
-| three-page migration | Knowledge assets, Article digestion, News acquisition home entrances | implemented, locally passed |
+| three-page migration | News, analysis, and research entrances | implemented, locally passed |
 | publish flow | build, validate, commit, retry push, remote SHA verify | completed |
 | Pages verify | public Pages URL and data endpoint established | completed; current release reverified by runner |
-| smoke test | 4 Playwright tests: 8 entrances; 6 detail types; search/relation/timeline; mobile | implemented, 4/4 locally passed |
+| smoke test | 6 Playwright tests: Chinese news-first layout; 8 entrances; 6 detail types; search/relation/timeline; 19 research reports; Mermaid; mobile | implemented, 6/6 locally passed |
 | consistency check | counts match; duplicates, orphans, missing fields and local paths rejected | implemented, locally passed |
 | release freeze | independent static directory, enable marker, runbook and rollback tool | implementation complete; runner closes gate |
 | final acceptance | accessibility, sync, update, remote SHA and rollback evidence | runner and final GPT review close gate |

@@ -1,47 +1,32 @@
-# KFC Knowledge Portal Production Runbook
+# AI 资讯观察发布手册
 
-## Source and synchronization contract
+## 数据与同步约定
 
-- `data/semantic_pipeline_v2` and `data/news_library/news_library.sqlite3` in the KFC repository are the only truth sources.
-- The public portal is a read-only generated snapshot. It never writes back to local assets.
-- A successful formal asset mutation triggers build, consistency validation, atomic replacement, Git push, and remote SHA-256 verification.
-- A source digest prevents no-op publishes. A collection drop above 5%, an orphan relation, a missing critical field, or a local-path leak stops the release and preserves the previous online version.
-- News is a bounded recent projection, not a full-table static export. See `NEWS_SYNC_ARCHITECTURE.md` for the cursor-based remote API design required for large public history.
-- The 10-minute source-sync process dispatches the portal hook only after its SQLite transaction commits and only when new rows were inserted. Publishers share a filesystem lock, so concurrent digest/news updates cannot race the remote SHA check.
+- 本地结构化文件和新闻 SQLite 是内容来源；公网只读快照不反向写入。
+- 正式内容写入成功后，才执行重建、校验、提交、推送和远端哈希验证。
+- 来源摘要阻止无变化发布；数量异常下降、孤儿关系、必填字段缺失或本地路径泄漏都会中止发布。
+- 新闻只同步最近窗口，不导出完整 SQLite；并发更新通过文件锁串行化。
+- 深度研究通过明确清单发布，只允许正式成品，禁止自动扫描并公开过程材料。
 
-## Stable URL protocol
+## 稳定链接
 
-GitHub Pages serves one static application, so stable deep links use hash routes:
+站点使用以下 hash 路由：
 
-- `#topic/<id>`
-- `#issue/<id>`
-- `#card/<id>`
-- `#research/<id>`
-- `#article/<id>`
-- `#news/<id>`
+- `#topic/<id>`：专题观察
+- `#issue/<id>`：议题追踪
+- `#card/<id>`：分析卡片
+- `#research/<id>`：深度研究
+- `#article/<id>`：文章解读
+- `#news/<id>`：新闻资讯
 
-The canonical base is `https://searchbb.github.io/kfc-knowledge-atlas-demo-20260715/`.
-Digest mail uses the same protocol through `scripts/semantic_v2/portal_links.py`.
+统一地址为 `https://searchbb.github.io/ai-signals-observer/`。邮件只渲染同一套链接，不改变内容状态。
 
-## Relation navigation
+## 发布与回滚
 
-The generator emits one normalized relation list. The UI reads each relation in
-both directions, so Topic, Issue, Card, Research, Article, and News pages can all
-link back to the supporting or parent asset without duplicating relation records.
+1. 运行 `python3 scripts/sync_portal_data.py --repo-root /path/to/workspace`。
+2. 运行 `python3 scripts/validate_portal_data.py` 和真实浏览器测试。
+3. 运行 `python3 scripts/publish_portal_site.py --repo-root /path/to/workspace`。
+4. 保存 release commit、站点文件 SHA 和公网浏览器证据。
+5. 若发现回归，在临时 clone 中先验证 revert，再推送回滚提交。
 
-## Three operating entrances
-
-The production home page replaces the old scattered entry points with three
-first-class entrances backed by the same snapshot:
-
-1. Knowledge assets: Topics, Issues, Cards, and Research.
-2. Article digestion: materialized Articles and their terminal state.
-3. News acquisition: News library rows, sources, summaries, and original URLs.
-
-## Release and rollback
-
-1. Run `python3 scripts/sync_portal_data.py --repo-root /path/to/KFC`.
-2. Run `python3 scripts/validate_portal_data.py` and the browser smoke suite.
-3. Run `python3 scripts/publish_portal_site.py --repo-root /path/to/KFC`.
-4. Keep the returned `commit_sha`, `site_data_sha256`, and remote verification result.
-5. If a verified regression is found, revert the release commit in this static-site repository, push the revert, and rerun public verification. The local KFC truth source is not rolled back by a portal rollback.
+仓库改名的回滚命令只保存在本地发布证据包中，不写入公开说明。代码版本回滚不会修改本地数据来源。

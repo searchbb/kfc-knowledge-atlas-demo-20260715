@@ -1,81 +1,47 @@
-# KFC Knowledge Asset Portal
+# AI 资讯观察
 
-This repo is the production static GitHub Pages mirror for the KFC knowledge portal.
-The KFC workspace remains the source of truth. This repo only stores generated
-site assets plus the scripts that rebuild and publish them.
+这是一个基于公开信息生成的 AI 新闻与趋势分析站点。GitHub Pages 只保存经过筛选的静态页面、近期新闻窗口和正式研究成品；本地数据库、工作路径、草稿、提示词、素材账本与审阅过程不会发布。
 
-## Requirements
+公网地址：`https://searchbb.github.io/ai-signals-observer/`
 
-- Python 3.10+
-- Git access to `searchbb/kfc-knowledge-atlas-demo-20260715`
-- A local KFC checkout with:
-  - `data/semantic_pipeline_v2/`
-  - `data/news_library/news_library.sqlite3`
+## 内容范围
 
-## Fixed Publish Flow
+- 新闻资讯：最近 500 条公开来源资讯，同时显示本地累计数量。
+- 深度研究：由 `scripts/research_publication_manifest.json` 明确选择的正式成品。
+- 专题观察、议题追踪与分析卡片：结构化的长期观察内容。
+- 文章解读：已经进入整理流程的公开文章。
 
-Run the full build -> publish -> verify sequence from this repo:
+## 发布流程
 
 ```bash
 /Users/mac/.pyenv/versions/3.10.14/bin/python3 \
   scripts/publish_portal_site.py \
-  --repo-root /Users/mac/Downloads/code/KFC
+  --repo-root /path/to/local/workspace
 ```
 
-The script performs five guarded steps:
+发布程序依次完成：
 
-1. Rebuild `data/site-data.json` from the local KFC truth sources.
-2. Validate counts, required fields, relation endpoints, timeline endpoints, and public-path safety.
-3. Stage and commit all repo changes only when the source digest changed.
-4. Push the current branch to `origin` with bounded retry.
-5. Verify the public GitHub Pages site by checking:
-   - `https://searchbb.github.io/kfc-knowledge-atlas-demo-20260715/`
-   - `https://searchbb.github.io/kfc-knowledge-atlas-demo-20260715/data/site-data.json`
+1. 从本地来源重建 `data/site-data.json`，并复制研究正文引用的静态图片。
+2. 校验数量、必填字段、关系、时间线、研究清单和本地路径泄漏。
+3. 仅在内容变化时提交，并在发布锁内推送。
+4. 校验公网 `index.html`、`app.js`、`styles.css`、`site-data.json` 和研究图片的 SHA-256。
+5. 保留上一版在线内容，失败构建不会覆盖已验证版本。
 
-The verification step requires the remote `site-data.json` SHA-256 to match the
-local generated file.
+## 同步边界
 
-`sync_portal_data.py` performs an atomic replacement. A collection drop greater
-than 5% is rejected by default, so an incomplete local read cannot overwrite the
-last known-good public snapshot.
+本地 SQLite 保存完整新闻历史，数据库文件不会上传。静态站点仅生成最近 500 条新闻窗口；未来若需要几十万或百万条历史在线检索，应采用独立远端查询服务，而不是扩大静态 JSON。
 
-## Automatic publish after asset changes
+内容成功写入后可触发同一套受保护发布流程；没有新增内容时不会重复提交。
 
-The 30-minute formal digest pipeline calls `scripts/semantic_v2/portal_publish_hook.py`
-after an article reaches the terminal `digested` state. The hook is active only
-when `.portal-auto-publish-enabled` exists. It performs the same guarded build,
-push, and remote hash verification used for manual production releases. Failed
-publishes are recorded without removing the last verified online version.
-
-The 10-minute source-sync process dispatches the same hook after a successful
-SQLite commit when new rows were inserted. The public snapshot reads only the
-indexed latest-500 window, and a publish lock serializes concurrent digest/news
-updates. The SQLite database itself is never uploaded.
-
-See `PRODUCTION_RUNBOOK.md` for deep-link rules, relation navigation, rollback,
-and operational checks.
-
-## New Environment Repeatability
-
-On a fresh machine or clone:
+## 新环境复现
 
 ```bash
-git clone https://github.com/searchbb/kfc-knowledge-atlas-demo-20260715.git
-cd kfc-knowledge-atlas-demo-20260715
-/Users/mac/.pyenv/versions/3.10.14/bin/python3 \
-  scripts/publish_portal_site.py \
-  --repo-root /path/to/KFC \
+git clone https://github.com/searchbb/ai-signals-observer.git
+cd ai-signals-observer
+python3 scripts/publish_portal_site.py \
+  --repo-root /path/to/local/workspace \
   --skip-push \
   --skip-verify
 ```
 
-That proves the build path is reproducible before granting push credentials.
-
-## Useful Flags
-
-- `--skip-push`: rebuild and commit locally without pushing.
-- `--skip-verify`: skip the public Pages verification step.
-- `--pages-url <url>`: override the derived public URL.
-- `--verify-attempts <n>` and `--verify-sleep-seconds <n>`: adjust retry logic
-  when Pages deployment is slow.
-- `--push-attempts <n>` and `--push-sleep-seconds <n>`: adjust bounded push retry.
+详细路由、回滚和运行检查见 `PRODUCTION_RUNBOOK.md`。

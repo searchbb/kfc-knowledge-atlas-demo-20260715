@@ -1,13 +1,13 @@
-# Scalable News Synchronization Boundary
+# News Synchronization Boundary
 
 ## What the public site does now
 
-The Mac SQLite database remains the authoritative news store. The static portal
+The local SQLite database remains the authoritative news store. The static site
 does **not** upload the database and does **not** export the full table on every
 publish. Its main snapshot contains only the latest bounded window (default 500
 rows) plus `newsMeta.totalCount`, cursor timestamps, and the public fields needed
-for recent browsing. Knowledge assets remain a separate, comparatively small
-full snapshot.
+for recent browsing. Structured analysis and curated research remain separate,
+comparatively small snapshots.
 
 ## Production path for large history
 

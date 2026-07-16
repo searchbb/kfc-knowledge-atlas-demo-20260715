@@ -161,7 +161,7 @@ def summarize_markdown(raw: str, *, limit: int = 320) -> str:
     body = re.sub(r"^>.*$", " ", body, flags=re.MULTILINE)
     body = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", body)
     body = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", body)
-    body = body.replace("`", " ")
+    body = re.sub(r"[*_~`]+", " ", body)
     summary = re.sub(r"\s+", " ", body).strip()
     return summary[:limit]
 
@@ -315,6 +315,7 @@ def parse_research_report(
     )
     header = HEADER_RE.search(raw)
     title = header.group("title").strip() if header else path.parent.name
+    title = re.sub(r"^Research Report\s*[:：]\s*", "", title, flags=re.IGNORECASE)
     html = render_markdown(raw)
     return {
         "id": report_id,
