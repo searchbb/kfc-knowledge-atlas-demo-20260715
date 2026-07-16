@@ -181,7 +181,10 @@ def verify_public_site(
                 raise ValueError("index.html does not reference app.js")
             if b'fetch("./data/site-data.json"' not in app_js:
                 raise ValueError("app.js does not fetch site-data.json")
-            if b'<link rel="stylesheet" href="./styles.css"' not in index_html:
+            if not re.search(
+                rb'<link\s+rel="stylesheet"\s+href="\./styles\.css(?:\?[^"<>]*)?"\s*/?>',
+                index_html,
+            ):
                 raise ValueError("index.html does not reference styles.css")
             if remote_index_sha != expected_index_sha:
                 raise ValueError(
