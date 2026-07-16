@@ -13,6 +13,9 @@
       .skeleton-copy.short { width: 68%; max-width: 620px; margin-top: 10px; }
       .skeleton-row { width: 100%; height: 52px; }
       .loading-note[hidden] { display: none; }
+      .initial-route-loading { display: none; }
+      .initial-non-home .bootstrap-home { display: none; }
+      .initial-non-home .initial-route-loading { display: block; }
       @keyframes initial-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
       @media (prefers-reduced-motion: reduce) { .skeleton-line { animation: none; } }
     </style>
@@ -22,8 +25,14 @@
           "direct-detail",
           /^#(?:topic|issue|card|research|article|news)\/.+/.test(location.hash),
         );
+        const syncInitialRoute = () => document.documentElement.classList.toggle(
+          "initial-non-home",
+          !/^#?(?:home)?$/.test(location.hash),
+        );
         syncRouteMode();
+        syncInitialRoute();
         addEventListener("hashchange", syncRouteMode);
+        addEventListener("hashchange", syncInitialRoute);
       })();
     </script>
     <link rel="preload" href="./styles.css?v=20260716-route-index-1" as="style" onload="this.onload=null;this.rel='stylesheet'" />
@@ -74,9 +83,31 @@
             <div id="search-results" class="search-results"></div>
           </div>
         </header>
-        <section id="stats" class="stats"></section>
+        <section id="stats" class="stats">
+          <!-- HOME_STATS_START -->
+          <p class="stats-title">内容规模</p>
+          <div class="stat"><p>新闻资讯</p><strong>2,532</strong></div>
+          <div class="stat"><p>深度研究</p><strong>19</strong></div>
+          <div class="stat"><p>专题观察</p><strong>16</strong></div>
+          <div class="stat"><p>分析卡片</p><strong>157</strong></div>
+          <div class="stat"><p>综合研判</p><strong>7</strong></div>
+          <div class="stat"><p>文章解读</p><strong>952</strong></div>
+          <!-- HOME_STATS_END -->
+        </section>
         <section id="content" class="content-panel">
-          <section class="portal-loading" aria-live="polite">
+          <!-- HOME_CONTENT_START -->
+          <div class="bootstrap-home" data-home-bootstrap data-generated-at="2026-07-16T08:18:01.132102+00:00">
+            <section class="news-front">
+              <div class="section-heading"><div><p class="eyebrow">今日关注</p><h3>最新 AI 资讯</h3></div><a href="#news">查看全部新闻 →</a></div>
+              <div class="lead-grid"><a class="lead-story" href="#news/news_f8cab34ff5ba505863d9"><span class="news-label">头条</span><h3>日本拟采购2.75万颗英伟达Rubin芯片，打造本土机器人AI基础模型</h3><p>7月16日消息，日本计划采购2.75万颗英伟达下一代Rubin AI芯片，用于构建本土机器人基础AI模型。新成立的Noetra将负责建设大型数据中心，并计划于2027年3月发布首个AI模型，随后持续迭代，未来数年推出面向机器人应用的AI模型。Noetra截至2027年3月已获日本政府3873亿日元资金支持，由软银、丰田汽车支持的Preferred Networks、日本电气等数十家企业参与运营。该项目旨在降低对海外技术依赖，并推动日本到2040年占据全球约60万亿日元机器人…</p><time>2026-07-16 15:56</time></a><div class="brief-list"><a class="news-brief" href="#news/news_4196b8a44fe1158b1309"><span>02</span><div><strong>10999元！摩尔线程MTT AICUBE开售：自研长江SoC+32GB显存</strong><small>163.com · 2026-07-16</small></div></a><a class="news-brief" href="#news/news_64feebffc15d5b802732"><span>03</span><div><strong>京东：推出京麦AI经营中心</strong><small>36kr.com · 2026-07-16</small></div></a><a class="news-brief" href="#news/news_34ae35101cbbc9095fb5"><span>04</span><div><strong>台积电上调销售和支出展望，再添AI需求持续迹象</strong><small>36kr.com · 2026-07-16</small></div></a><a class="news-brief" href="#news/news_47be51da2499a5146e71"><span>05</span><div><strong>苹果自研AI服务器芯片计划被曝推迟</strong><small>36kr.com · 2026-07-16</small></div></a><a class="news-brief" href="#news/news_643ee7f584e5642f441e"><span>06</span><div><strong>告别预览版！AMD ROCm 7.14正式版发布：锐龙 AI 400系列终于上车</strong><small>163.com · 2026-07-16</small></div></a><a class="news-brief" href="#news/news_1664e079fa3ff4e1ed3a"><span>07</span><div><strong>韩国将暂时停止发行新的个股杠杆ETF</strong><small>36kr.com · 2026-07-16</small></div></a><a class="news-brief" href="#news/news_5139a141cc8bb58d3ac2"><span>08</span><div><strong>商务部回应推动解决安世半导体问题进展</strong><small>36kr.com · 2026-07-16</small></div></a><a class="news-brief" href="#news/news_395af4f076759777ed0e"><span>09</span><div><strong>百度文库、网盘7月底将升级GenFlow</strong><small>36kr.com · 2026-07-16</small></div></a></div></div>
+            </section>
+            <section class="research-front">
+              <div class="section-heading"><div><p class="eyebrow">趋势与洞察</p><h3>深度研究</h3></div><a href="#research">查看全部 19 份研究 →</a></div>
+              <div class="research-grid"><a class="research-card" href="#research/agent-runtime-trustworthy-execution"><span>技术趋势</span><h4>Agent Runtime 可信执行：企业 Agent 商业化的隐藏基础设施</h4><p>核心判断：模型决定 Agent 能做什么，Runtime 决定企业敢让 Agent 做什么。 Agent 商业竞争正在从&quot;模型能力竞争&quot;转向&quot;Runtime 可信执行竞争&quot;。企业不会因为 Agent&quot;会做事情&quot;就把核心流程交出去，而是因为 Runtime 能保证&quot;出了问题可以停、可以看、可以恢复、可以追责&quot;，才敢规模化部署。Checkpoint 让错误可恢复，Trace 让行为可解释，Governance 让规模化成为可能。 三个核心判断 ： 1. 模型解决&quot;能不能完成任务&quot; ——GPT 4、Claude、DeepSeek 的能力边界在扩展，但这只是必要条件 2. Runtime 解决&quot;敢不敢交给企业&quot; ——没有可回退、可观</p><small>4 张图表 · 2026-07-09</small></a><a class="research-card" href="#research/agentarts-industry-ecosystem"><span>行业观察</span><h4>AgentArts 研讨会研究框架（视觉增强版）</h4><p>Source Material: 5 active Issue Cards + prior research packs Visual Enhancement: 6 Mermaid 图 + 7 表格四件套 本报告由 GPT 基于 KFC Issue Card 素材库和外部搜索生成，经视觉增强（Step 7: 观点驱动图例）处理。 所有数据标注了来源或&quot;待验证&quot;；未编造数据 所有 Mermaid 图包含四件套：visual thesis + 图本体 + 读图说明 + 不能误读为 表格包含结论/启发列（对比表）或破坏的战略环节列（风险表） ⚠️ 类比材料修正 ：原报告引用 Notion 作为直接证据，已按 ski</p><small>6 张图表 · 2026-06-30</small></a><a class="research-card" href="#research/department-topic-03-maas-token-economics"><span>商业观察</span><h4>专题三 v2 补充报告：MaaS 商业模式拆解与 Token 经济</h4><p>MaaS（Model as a Service）不是单一商业模式，而是 6 种模式的组合光谱。从&quot;最轻&quot;的 API 转售到&quot;最重&quot;的行业垂直 MaaS，每种模式在收入结构、成本曲线、毛利水平和昇腾硬件拉动强度上存在系统性差异。 核心发现 ： 1. API 转售保入口但难赚钱 ：价格战压缩价差，上游模型厂商掌控定价权，平台毛利波动极大甚至可能负毛利（A2 A4）。昇腾拉动弱，除非将高频调用迁移到自有托管池。 2. 云上托管是 MaaS 基本盘 ：收入按 Token/QPS/实例/套餐多元计价，但毛利高度依赖利用率。同硬件低并发 vs 高并发成本可差 17 倍（I1）。连续批处理将利用率从 40% 提升至 90%，量化降低 60</p><small>4 张图表 · 2026-06-24</small></a><a class="research-card" href="#research/department-topic-08-national-livelihood-cloud"><span>行业观察</span><h4>专题八：混合云在国计民生如何做大做强</h4><p>核心研究问题 : 专业服务、咨询、实施、托管运营、行业资产包到底怎么收钱？如何避免低毛利人力？如何沉淀为资产？ v1.0与v2.0定位 : v1.0: 回答&quot;为什么&quot;——混合云在国计民生场景中为什么要从项目交付走向专业服务、托管运营与行业资产变现 v2.0: 回答&quot;怎么收钱、怎么经营&quot;——服务、资产、运营和Token如何收费、如何复用、如何衡量 研究框架 : 三阶段问题递进（理论层→问题层→方法层） 三阶段递进：理论层（为什么）→ 问题层（怎么卖）→ 方法层（怎么卖） 问题链：三阶段问题递进（为什么国计民生是混合云基础盘？客户为什么愿意为服务付费？华为云如何多路并进？8类收入如何拆解？项目→资产→运营路径？L1 L5</p><small>4 张图表 · 2026-06-24</small></a><a class="research-card" href="#research/department-topic-09-agentic-cloud"><span>技术趋势</span><h4>专题九：Agentic Cloud 的产品技术制高点</h4><p>当 AI 云从&quot;卖可见资源&quot;走向&quot;承接 Token、模型调用和 Agent 任务链&quot;，云厂商的竞争焦点就从&quot;有没有资源&quot;转向&quot;能否控制、优化、治理和计量 AI workload&quot;。 这是本报告的核心主轴。 AI 云正在经历一次比&quot;从物理机到虚拟机&quot;更深刻的产品抽象变革：云产品从&quot;卖可见资源&quot;（CPU/内存/磁盘/GPU）转向&quot;卖封装智能能力&quot;（Token、Agent、任务结果）。这一转变的本质不是技术升级，而是 控制平面的上移 ——客户不再关心每个 Token 跑在哪张卡上，只关心任务是否完成、成本是否可控、结果是否可审计。 本报告提出四个核心主张： 1. 智算云产品抽象从可见资源转向封装智能能力 。Forrester 20</p><small>0 张图表 · 2026-06-23</small></a><a class="research-card" href="#research/department-topic-07-public-cloud-hardware"><span>产业趋势</span><h4>公有云如何兑现更高硬件价值：从硅基黑土地、Token workload 到模型/智能体生态与统一资源池运营</h4><p>核心判断 : 公有云兑现硬件价值的核心，不是把硬件以资源形态卖出去，而是把硬件转化为持续发生的 AI workload——模型调用、Token 消耗、Agent 任务、行业应用和云服务消费。模型生态和智能体生态提供 workload 来源，Token workload ledger 提供经营度量，统一资源池运营降低单位成本，资源烟囱化是最大反向风险。 证据强度 : medium（推理优化与资源碎片化证据较强；模型生态→真实付费 workload、Token→收入/毛利/硬件反哺的经营证据存在断点；华为云特定证据以 vendor claim 为主，需进一步验证） 主要分歧 : 公有云是否比客户自有硬件更经济；统一资源池是否牺牲</p><small>7 张图表 · 2026-06-23</small></a></div>
+            </section>
+          </div>
+          <!-- HOME_CONTENT_END -->
+          <section class="portal-loading initial-route-loading" aria-live="polite">
             <p class="eyebrow">最新内容</p>
             <div class="skeleton-line skeleton-title"></div>
             <div class="skeleton-line skeleton-copy"></div>
@@ -158,6 +189,6 @@
           .catch(() => null);
       })();
     </script>
-    <script type="module" async src="./app.js?v=20260716-route-index-1"></script>
+    <script type="module" async src="./app.js?v=20260716-home-bootstrap-1"></script>
   </body>
 </html>

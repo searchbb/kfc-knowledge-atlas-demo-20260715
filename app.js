@@ -106,15 +106,45 @@ async function init() {
     void renderRoute();
   });
   state.fastDetail = await loadFastDetail();
+  const { route, id } = routeParts();
+  const homeBootstrap = !id && route === "home"
+    ? contentEl.querySelector("[data-home-bootstrap]")
+    : null;
   if (state.fastDetail) {
     state.detailCache.set(`${state.fastDetail.type}/${state.fastDetail.id}`, state.fastDetail.item);
     state.data = emptyPortalData(state.fastDetail.type, state.fastDetail.item);
     setActiveNav(state.fastDetail.type);
     renderDetail(state.fastDetail.type, state.fastDetail.item);
-  } else {
+  } else if (!homeBootstrap) {
     renderPortalLoading();
   }
-  if (!state.fastDetail) await renderRoute();
+  if (homeBootstrap) {
+    statsEl.hidden = false;
+    setActiveNav("home");
+    void hydrateHomeBootstrap(homeBootstrap.dataset.generatedAt || "");
+  } else if (!state.fastDetail) {
+    await renderRoute();
+  }
+}
+
+async function hydrateHomeBootstrap(embeddedGeneratedAt) {
+  const loadId = ++state.indexLoadId;
+  try {
+    const data = await fetchJson("./data/route-home.json", { timeoutMs: 30000 });
+    if (loadId !== state.indexLoadId) return;
+    mergeData(data);
+    state.loadedRoutes.add("home");
+    renderStats();
+    renderTopicNav();
+    const current = routeParts();
+    if (current.route === "home" && !current.id) renderHome();
+    if (embeddedGeneratedAt && data.generatedAt !== embeddedGeneratedAt) {
+      document.documentElement.dataset.homeRefreshed = "true";
+    }
+  } catch (error) {
+    // 静态首页已经可读；后台刷新失败时保留内容，不降级为错误页。
+    searchInput.placeholder = "当前显示最近快照，可继续浏览";
+  }
 }
 
 async function ensureRouteData(route) {

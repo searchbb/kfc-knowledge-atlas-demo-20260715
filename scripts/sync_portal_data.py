@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import html
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +40,10 @@ INDEX_SUMMARY_LIMITS = {
     "topics": 600,
 }
 ROUTE_COLLECTIONS = ("topics", "issues", "cards", "research", "articles", "news")
+HOME_STATS_START = "<!-- HOME_STATS_START -->"
+HOME_STATS_END = "<!-- HOME_STATS_END -->"
+HOME_CONTENT_START = "<!-- HOME_CONTENT_START -->"
+HOME_CONTENT_END = "<!-- HOME_CONTENT_END -->"
 
 
 def now_iso() -> str:
@@ -183,6 +189,139 @@ def build_route_indexes(index_payload: dict[str, object], output_root: Path) -> 
         "status": "success",
         "files": files,
         "max_gzip_bytes": max(int(item["gzip_bytes"]) for item in files.values()),
+    }
+
+
+def bootstrap_text(value: object) -> str:
+    text = re.sub(r"[*_~`#>\-]+", " ", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def bootstrap_time(item: dict[str, object]) -> str:
+    value = str(
+        item.get("publishedAt")
+        or item.get("updatedAt")
+        or item.get("mtime")
+        or item.get("lastUpdated")
+        or "-"
+    )
+    return value.replace("T", " ")[:16]
+
+
+def bootstrap_sort_key(item: dict[str, object]) -> str:
+    return str(
+        item.get("publishedAt")
+        or item.get("updatedAt")
+        or item.get("mtime")
+        or item.get("lastUpdated")
+        or ""
+    )
+
+
+def bootstrap_href(detail_type: str, item: dict[str, object]) -> str:
+    item_id = quote(str(item.get("id") or ""), safe=URL_SAFE_FILENAME_CHARS)
+    return f"#{detail_type}/{item_id}"
+
+
+def render_home_bootstrap(home_payload: dict[str, object]) -> tuple[str, str]:
+    esc = lambda value: html.escape(str(value or ""), quote=True)
+    collections = dict(home_payload.get("collections") or {})
+    stats = dict(home_payload.get("stats") or {})
+    generated_at = esc(home_payload.get("generatedAt") or "")
+    stat_rows = [
+        ("新闻资讯", stats.get("news", 0)),
+        ("深度研究", stats.get("research", 0)),
+        ("专题观察", stats.get("topics", 0)),
+        ("分析卡片", stats.get("issues", 0)),
+        ("综合研判", stats.get("cards", 0)),
+        ("文章解读", stats.get("articles", 0)),
+    ]
+    stats_html = "\n          ".join(
+        ["<p class=\"stats-title\">内容规模</p>"]
+        + [
+            f'<div class="stat"><p>{label}</p><strong>{int(value or 0):,}</strong></div>'
+            for label, value in stat_rows
+        ]
+    )
+
+    news = sorted(
+        list(collections.get("news") or []), key=bootstrap_sort_key, reverse=True
+    )[:9]
+    research = sorted(
+        list(collections.get("research") or []), key=bootstrap_sort_key, reverse=True
+    )[:6]
+    lead = news[0] if news else None
+    if lead:
+        lead_html = (
+            f'<a class="lead-story" href="{bootstrap_href("news", lead)}">'
+            '<span class="news-label">头条</span>'
+            f'<h3>{esc(lead.get("title"))}</h3>'
+            f'<p>{esc(bootstrap_text(lead.get("summary") or "来自公开信息源的最新动态。"))}</p>'
+            f'<time>{esc(bootstrap_time(lead))}</time></a>'
+        )
+    else:
+        lead_html = '<div class="empty">暂无新闻。</div>'
+    brief_html = "".join(
+        f'<a class="news-brief" href="{bootstrap_href("news", item)}">'
+        f'<span>{index:02d}</span><div><strong>{esc(item.get("title"))}</strong>'
+        f'<small>{esc(str(item.get("sourceId") or "公开信息").removeprefix("www."))} · '
+        f'{esc(bootstrap_time(item)[:10])}</small></div></a>'
+        for index, item in enumerate(news[1:], start=2)
+    )
+    research_html = "".join(
+        f'<a class="research-card" href="{bootstrap_href("research", item)}">'
+        f'<span>{esc(item.get("category") or "深度研究")}</span>'
+        f'<h4>{esc(item.get("title"))}</h4>'
+        f'<p>{esc(bootstrap_text(item.get("summary")))}</p>'
+        f'<small>{int(item.get("diagramCount") or 0)} 张图表 · {esc(bootstrap_time(item)[:10])}</small></a>'
+        for item in research
+    )
+    content_html = f'''<div class="bootstrap-home" data-home-bootstrap data-generated-at="{generated_at}">
+            <section class="news-front">
+              <div class="section-heading"><div><p class="eyebrow">今日关注</p><h3>最新 AI 资讯</h3></div><a href="#news">查看全部新闻 →</a></div>
+              <div class="lead-grid">{lead_html}<div class="brief-list">{brief_html}</div></div>
+            </section>
+            <section class="research-front">
+              <div class="section-heading"><div><p class="eyebrow">趋势与洞察</p><h3>深度研究</h3></div><a href="#research">查看全部 {len(collections.get("research") or [])} 份研究 →</a></div>
+              <div class="research-grid">{research_html}</div>
+            </section>
+          </div>'''
+    return stats_html, content_html
+
+
+def replace_marked_region(text: str, start: str, end: str, body: str) -> str:
+    pattern = re.compile(f"{re.escape(start)}.*?{re.escape(end)}", re.DOTALL)
+    replacement = f"{start}\n          {body}\n          {end}"
+    updated, count = pattern.subn(replacement, text, count=1)
+    if count != 1:
+        raise RuntimeError(f"index template marker missing or duplicated: {start}")
+    return updated
+
+
+def sync_home_bootstrap(*, index_path: Path, route_home_path: Path) -> dict[str, object]:
+    home_payload = json.loads(route_home_path.read_text(encoding="utf-8"))
+    stats_html, content_html = render_home_bootstrap(home_payload)
+    text = index_path.read_text(encoding="utf-8")
+    text = replace_marked_region(text, HOME_STATS_START, HOME_STATS_END, stats_html)
+    text = replace_marked_region(text, HOME_CONTENT_START, HOME_CONTENT_END, content_html)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix=".index-home-bootstrap-",
+        suffix=".html",
+        dir=str(index_path.parent),
+        delete=False,
+    ) as handle:
+        temp_index = Path(handle.name)
+        handle.write(text)
+    temp_index.replace(index_path)
+    return {
+        "status": "success",
+        "path": str(index_path),
+        "sha256": sha256_file(index_path),
+        "generated_at": home_payload.get("generatedAt"),
+        "bytes": index_path.stat().st_size,
+        "gzip_bytes": len(gzip.compress(index_path.read_bytes(), compresslevel=9, mtime=0)),
     }
 
 
@@ -406,6 +545,10 @@ def main() -> int:
         payload_path=out_path,
         index_path=out_path.parent / "site-index.json",
     )
+    home_bootstrap = sync_home_bootstrap(
+        index_path=out_path.parent.parent / "index.html",
+        route_home_path=out_path.parent / "route-home.json",
+    )
 
     result = {
         "status": "success",
@@ -420,6 +563,7 @@ def main() -> int:
         **summary,
         "validation": validation,
         "site_index": site_index,
+        "home_bootstrap": home_bootstrap,
         "detail_shards": detail_shards,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))

@@ -3,34 +3,42 @@ const path = require("node:path");
 
 const siteRoot = path.resolve(__dirname, "..");
 const homeIndexPath = path.join(siteRoot, "data/route-home.json");
+const newsIndexPath = path.join(siteRoot, "data/route-news.json");
 const baseURL = process.env.PORTAL_BASE_URL || "http://127.0.0.1:8765/";
 
-test("HTML skeleton appears before a delayed home route index", async ({ page }) => {
+test("static home remains readable while the fresh home route is delayed", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route("**/data/route-home.json", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 3000));
     await route.fulfill({ path: homeIndexPath, contentType: "application/json" });
   });
   await page.goto(`${baseURL}#home`, { waitUntil: "domcontentloaded" });
-  await expect(page.locator(".portal-loading")).toBeVisible();
-  await expect(page.locator(".loading-note")).toBeHidden();
+  await expect(page.locator("[data-home-bootstrap] .lead-story")).toBeVisible();
+  await expect(page.locator(".portal-loading")).toBeHidden();
   await page.waitForTimeout(2600);
-  await expect(page.locator(".loading-note")).toHaveText("正在加载最新内容…");
-  await expect(page.locator(".loading-note")).toBeVisible();
   await expect(page.locator("#content h3").first()).toContainText("最新 AI 资讯", { timeout: 5000 });
 });
 
-test("a failed route load offers a working retry", async ({ page }) => {
+test("home is readable even when both app and fresh home data are unavailable", async ({ page }) => {
+  await page.route("**/app.js*", (route) => route.abort("failed"));
+  await page.route("**/data/route-home.json", (route) => route.abort("failed"));
+  await page.goto(`${baseURL}#home`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator("[data-home-bootstrap] .lead-story")).toBeVisible();
+  await expect(page.locator("#content h3").first()).toContainText("最新 AI 资讯");
+  await expect(page.locator(".load-error")).toHaveCount(0);
+});
+
+test("a failed non-home route load offers a working retry", async ({ page }) => {
   let requests = 0;
-  await page.route("**/data/route-home.json", async (route) => {
+  await page.route("**/data/route-news.json", async (route) => {
     requests += 1;
     if (requests === 1) return route.fulfill({ status: 503, body: "unavailable" });
-    return route.fulfill({ path: homeIndexPath, contentType: "application/json" });
+    return route.fulfill({ path: newsIndexPath, contentType: "application/json" });
   });
-  await page.goto(`${baseURL}#home`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${baseURL}#news`, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".load-error h3")).toHaveText("内容加载失败");
   await page.locator(".retry-button").click();
-  await expect(page.locator("#content h3").first()).toContainText("最新 AI 资讯");
+  await expect(page.locator("#content h3").first()).toContainText("新闻资讯");
   expect(requests).toBe(2);
 });
 

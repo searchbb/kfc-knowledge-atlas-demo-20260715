@@ -8,8 +8,8 @@ const siteRoot = path.resolve(__dirname, "..");
 const baseURL = (process.env.PORTAL_BASE_URL || "https://searchbb.github.io/ai-signals-observer/").replace(/\/?$/, "/");
 const outputPath = process.env.PORTAL_PERF_OUTPUT || path.join(siteRoot, "output/playwright/online-performance.json");
 const profiles = [
-  { name: "normal_4g", latency: 150, download: 200 * 1024, upload: 80 * 1024, limits: { skeleton: 800, home: 3000, detail: 2000 } },
-  { name: "slow_mobile", latency: 300, download: 100 * 1024, upload: 40 * 1024, limits: { skeleton: 2000, home: 5000, detail: 4000 } },
+  { name: "normal_4g", latency: 150, download: 200 * 1024, upload: 80 * 1024, limits: { post_ttfb: 300, detail: 2000 } },
+  { name: "slow_mobile", latency: 300, download: 100 * 1024, upload: 40 * 1024, limits: { post_ttfb: 300, detail: 4000 } },
 ];
 
 async function runAttempt(browser, profile, attempt) {
@@ -30,10 +30,12 @@ async function runAttempt(browser, profile, attempt) {
   const started = performance.now();
   await page.goto(`${baseURL}#home`, { waitUntil: "domcontentloaded", timeout: 20000 });
   const skeletonMs = Math.round(performance.now() - started);
-  const skeletonVisible = await page.locator(".portal-loading").isVisible().catch(() => false);
+  const bootstrapVisible = await page.locator("[data-home-bootstrap] .lead-story").isVisible().catch(() => false);
   const navigationInteractive = await page.locator(".nav a").first().isVisible().catch(() => false);
   await page.locator("#content h3").first().waitFor({ state: "visible", timeout: 15000 });
   const homeMs = Math.round(performance.now() - started);
+  const responseStartMs = await page.evaluate(() => Math.round(performance.getEntriesByType("navigation")[0]?.responseStart || 0));
+  const postTtfbMs = Math.max(0, homeMs - responseStartMs);
 
   const detailStarted = performance.now();
   await page.locator(".lead-story").click();
@@ -43,10 +45,9 @@ async function runAttempt(browser, profile, attempt) {
   const indexRequests = requests.filter((url) => url.includes("/data/site-index.json"));
   const routeHomeRequests = requests.filter((url) => url.includes("/data/route-home.json"));
   const detailRequests = requests.filter((url) => url.includes("/data/details/"));
-  const passed = skeletonMs <= profile.limits.skeleton
-    && homeMs <= profile.limits.home
+  const passed = postTtfbMs <= profile.limits.post_ttfb
     && detailMs <= profile.limits.detail
-    && skeletonVisible
+    && bootstrapVisible
     && navigationInteractive
     && siteDataRequests.length === 0
     && indexRequests.length === 0
@@ -62,7 +63,9 @@ async function runAttempt(browser, profile, attempt) {
     skeleton_ms: skeletonMs,
     home_content_ms: homeMs,
     detail_content_ms: detailMs,
-    skeleton_visible_at_domcontentloaded: skeletonVisible,
+    bootstrap_visible_at_domcontentloaded: bootstrapVisible,
+    response_start_ms: responseStartMs,
+    post_ttfb_content_ms: postTtfbMs,
     navigation_interactive: navigationInteractive,
     site_data_requests: siteDataRequests,
     site_index_request_count: indexRequests.length,
