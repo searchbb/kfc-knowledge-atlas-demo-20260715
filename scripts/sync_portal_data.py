@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -27,6 +28,15 @@ DETAIL_COLLECTION_TYPES = {
     "news": "news",
 }
 URL_SAFE_FILENAME_CHARS = "-_.!~*'()"
+INDEX_DETAIL_ONLY_FIELDS = {"html", "text", "path", "url"}
+INDEX_SUMMARY_LIMITS = {
+    "articles": 0,
+    "news": 240,
+    "research": 600,
+    "issues": 600,
+    "cards": 600,
+    "topics": 600,
+}
 
 
 def now_iso() -> str:
@@ -48,6 +58,79 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def truncate_text(value: object, limit: int) -> object:
+    if not isinstance(value, str):
+        return value
+    if limit <= 0:
+        return ""
+    if len(value) <= limit:
+        return value
+    return f"{value[: limit - 1].rstrip()}…"
+
+
+def build_site_index(payload: dict[str, object]) -> dict[str, object]:
+    collections: dict[str, list[dict[str, object]]] = {}
+    for collection_name, rows in dict(payload.get("collections") or {}).items():
+        summary_limit = INDEX_SUMMARY_LIMITS.get(collection_name, 600)
+        projected_rows: list[dict[str, object]] = []
+        for raw_item in list(rows or []):
+            item = {
+                key: value
+                for key, value in dict(raw_item).items()
+                if key not in INDEX_DETAIL_ONLY_FIELDS
+            }
+            if "summary" in item:
+                if summary_limit <= 0:
+                    item.pop("summary", None)
+                else:
+                    item["summary"] = truncate_text(item["summary"], summary_limit)
+            projected_rows.append(item)
+        collections[collection_name] = projected_rows
+    return {
+        "schemaVersion": payload.get("schemaVersion"),
+        "generatedAt": payload.get("generatedAt"),
+        "indexVersion": 1,
+        "buildMeta": payload.get("buildMeta") or {},
+        "stats": payload.get("stats") or {},
+        "collections": collections,
+        "newsMeta": payload.get("newsMeta") or {},
+        "relations": payload.get("relations") or [],
+        "timeline": payload.get("timeline") or [],
+    }
+
+
+def sync_site_index(*, payload_path: Path, index_path: Path) -> dict[str, object]:
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    index_payload = build_site_index(payload)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix=".site-index-",
+        suffix=".json",
+        dir=str(index_path.parent),
+        delete=False,
+    ) as handle:
+        temp_index = Path(handle.name)
+        json.dump(index_payload, handle, ensure_ascii=False, separators=(",", ":"))
+    try:
+        raw_bytes = temp_index.read_bytes()
+        temp_index.replace(index_path)
+    finally:
+        if temp_index.exists():
+            temp_index.unlink()
+    return {
+        "status": "success",
+        "path": str(index_path),
+        "sha256": sha256_file(index_path),
+        "bytes": len(raw_bytes),
+        "gzip_bytes": len(gzip.compress(raw_bytes, compresslevel=9, mtime=0)),
+        "counts": {
+            name: len(rows) for name, rows in index_payload["collections"].items()
+        },
+    }
 
 
 def sync_detail_shards(*, payload_path: Path, detail_root: Path) -> dict[str, object]:
@@ -232,6 +315,10 @@ def main() -> int:
         payload_path=out_path,
         detail_root=out_path.parent / "details",
     )
+    site_index = sync_site_index(
+        payload_path=out_path,
+        index_path=out_path.parent / "site-index.json",
+    )
 
     result = {
         "status": "success",
@@ -245,6 +332,7 @@ def main() -> int:
         "after_sha256": after_sha,
         **summary,
         "validation": validation,
+        "site_index": site_index,
         "detail_shards": detail_shards,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
