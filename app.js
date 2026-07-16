@@ -16,6 +16,7 @@ const statsEl = document.getElementById("stats");
 const topicNavEl = document.getElementById("topic-nav");
 const searchInput = document.getElementById("search-input");
 const searchResults = document.getElementById("search-results");
+const RESEARCH_INTAKE = window.KFC_RESEARCH_INTAKE || {};
 
 const ROUTES = {
   topic: "topics",
@@ -380,7 +381,148 @@ function renderAssetIndex(kind, items) {
   const rows = kind === "research"
     ? `<div class="research-grid research-index">${sorted.map(researchCard).join("")}</div>`
     : `<div class="editorial-list">${sorted.slice(0, 500).map((item) => assetRow(item)).join("")}</div>`;
-  contentEl.innerHTML = `<section class="list-panel index-page"><div class="section-heading"><div><p class="eyebrow">${typeLabel(kind)}</p><h3>${typeLabel(kind)} <small>${countLabel}</small></h3></div></div><p class="index-intro">${intro}</p>${rows || empty("暂无内容。")}</section>`;
+  contentEl.innerHTML = `${kind === "research" ? renderResearchIntake() : ""}<section class="list-panel index-page"><div class="section-heading"><div><p class="eyebrow">${typeLabel(kind)}</p><h3>${typeLabel(kind)} <small>${countLabel}</small></h3></div></div><p class="index-intro">${intro}</p>${rows || empty("暂无内容。")}</section>`;
+  if (kind === "research") bindResearchIntake();
+}
+
+function renderResearchIntake() {
+  const endpointReady = /^https:\/\//.test(String(RESEARCH_INTAKE.endpoint || ""));
+  return `<section class="research-intake" aria-labelledby="research-intake-title">
+    <div class="research-intake-heading">
+      <div><p class="eyebrow">研究课题征集</p><h3 id="research-intake-title">提交一个深度研究课题</h3></div>
+      <span class="intake-sla">目标 60 分钟内形成报告</span>
+    </div>
+    <p class="research-intake-lead">直接在这里写下想研究的问题、参考资料和交付方式。提交后会获得回执编号；课题进入独立研究队列，由本地 Research Pack 流程领取。</p>
+    <form id="research-intake-form" class="research-intake-form" novalidate>
+      <label class="form-field form-field-wide">
+        <span>课题标题 <b>*</b></span>
+        <input name="title" minlength="4" maxlength="120" required placeholder="例如：AI 云推理成本结构与竞争壁垒" />
+      </label>
+      <label class="form-field form-field-wide">
+        <span>核心研究问题 <b>*</b></span>
+        <textarea name="research_question" minlength="20" maxlength="6000" required rows="6" placeholder="希望回答什么问题？范围、时间跨度、地区、重点公司或反例是什么？"></textarea>
+      </label>
+      <label class="form-field form-field-wide">
+        <span>参考资料与补充提示</span>
+        <textarea name="reference_notes" maxlength="4000" rows="3" placeholder="可粘贴公开链接、已知事实、希望重点验证的判断；没有可留空。"></textarea>
+      </label>
+      <fieldset class="form-field delivery-choice">
+        <legend>交付方式 <b>*</b></legend>
+        <label><input type="radio" name="visibility" value="public" checked /> 公开报告</label>
+        <label><input type="radio" name="visibility" value="private" /> 私密报告</label>
+        <small id="visibility-help">公开报告完成后会进入本站“深度研究”；邮箱可选。</small>
+      </fieldset>
+      <label class="form-field">
+        <span>接收邮箱 <b id="email-required" hidden>*</b></span>
+        <input name="requester_email" type="email" maxlength="254" autocomplete="email" placeholder="私密报告必须填写" />
+        <small>私密报告只通过此邮箱交付，不在网站公开。</small>
+      </label>
+      <label class="form-field website-field" aria-hidden="true">
+        <span>Website</span><input name="website" tabindex="-1" autocomplete="off" />
+      </label>
+      <label class="consent-field form-field-wide">
+        <input name="consent" type="checkbox" required />
+        <span>我确认课题不包含密码、个人敏感信息或无权提交的保密材料，并理解一小时是目标时限，复杂课题可能排队或要求补充资料。</span>
+      </label>
+      <div class="research-intake-actions form-field-wide">
+        <button type="submit" class="research-submit" ${endpointReady ? "" : "disabled"}>${endpointReady ? "提交研究课题" : "提交入口正在接通"}</button>
+        <p id="research-intake-status" class="research-intake-status" role="status" aria-live="polite">${endpointReady ? "提交后请保存回执编号。" : "接收服务部署完成后，此处将直接开放，无需跳转到其他网站。"}</p>
+      </div>
+    </form>
+  </section>`;
+}
+
+function leadingZeroBits(hex, difficulty) {
+  const wholeNibbles = Math.floor(difficulty / 4);
+  const remainder = difficulty % 4;
+  if (!hex.startsWith("0".repeat(wholeNibbles))) return false;
+  if (!remainder) return true;
+  return Number.parseInt(hex[wholeNibbles], 16) < (1 << (4 - remainder));
+}
+
+async function sha256Hex(value) {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(bytes)].map((item) => item.toString(16).padStart(2, "0")).join("");
+}
+
+async function solveResearchChallenge(challenge) {
+  const difficulty = Number(challenge.difficulty || 12);
+  for (let counter = 0; counter < 5_000_000; counter += 1) {
+    const digest = await sha256Hex(`${challenge.nonce}:${counter}`);
+    if (leadingZeroBits(digest, difficulty)) return counter;
+    if (counter > 0 && counter % 500 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("安全校验计算超时，请稍后重试。");
+}
+
+async function intakeFetch(path, options = {}) {
+  const endpoint = String(RESEARCH_INTAKE.endpoint || "").replace(/\/$/, "");
+  const response = await fetch(`${endpoint}${path}`, { ...options, cache: "no-store" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.message || `提交失败（${response.status}）`);
+  return payload;
+}
+
+function bindResearchIntake() {
+  const form = document.getElementById("research-intake-form");
+  if (!form) return;
+  const email = form.elements.requester_email;
+  const emailRequired = document.getElementById("email-required");
+  const help = document.getElementById("visibility-help");
+  const status = document.getElementById("research-intake-status");
+  const submit = form.querySelector("button[type=submit]");
+  const syncVisibility = () => {
+    const isPrivate = form.elements.visibility.value === "private";
+    email.required = isPrivate;
+    emailRequired.hidden = !isPrivate;
+    help.textContent = isPrivate
+      ? "私密报告不会出现在网站，必须填写邮箱接收终稿。"
+      : "公开报告完成后会进入本站“深度研究”；邮箱可选。";
+  };
+  form.querySelectorAll('input[name="visibility"]').forEach((input) => input.addEventListener("change", syncVisibility));
+  syncVisibility();
+  if (!/^https:\/\//.test(String(RESEARCH_INTAKE.endpoint || ""))) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    const requestId = form.dataset.requestId || crypto.randomUUID();
+    form.dataset.requestId = requestId;
+    submit.disabled = true;
+    submit.textContent = "正在进行安全校验…";
+    status.className = "research-intake-status";
+    status.textContent = "正在准备提交，请不要关闭页面。";
+    try {
+      const challenge = await intakeFetch("/v1/challenge");
+      const counter = await solveResearchChallenge(challenge);
+      submit.textContent = "正在写入研究队列…";
+      const values = new FormData(form);
+      const payload = await intakeFetch("/v1/submissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_id: requestId,
+          title: values.get("title"),
+          research_question: values.get("research_question"),
+          reference_notes: values.get("reference_notes"),
+          visibility: values.get("visibility"),
+          requester_email: values.get("requester_email"),
+          website: values.get("website"),
+          consent: values.get("consent") === "on",
+          challenge_id: challenge.challenge_id,
+          challenge_counter: counter,
+        }),
+      });
+      status.className = "research-intake-status success";
+      status.innerHTML = `已进入研究队列。回执编号：<strong>${escapeHtml(payload.receipt_id)}</strong>。请保存此编号；目标在 ${Number(payload.target_minutes || RESEARCH_INTAKE.targetMinutes || 60)} 分钟内形成结果。`;
+      submit.textContent = "已提交";
+      localStorage.setItem("kfc-last-research-receipt", payload.receipt_id);
+    } catch (error) {
+      status.className = "research-intake-status error";
+      status.textContent = error.message || "提交失败，请稍后重试。";
+      submit.disabled = false;
+      submit.textContent = "重新提交";
+    }
+  });
 }
 
 function renderDetail(type, item) {

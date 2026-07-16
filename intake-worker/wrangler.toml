@@ -1,0 +1,15 @@
+name = "kfc-research-intake"
+main = "src/index.js"
+compatibility_date = "2026-07-16"
+
+[vars]
+ENVIRONMENT = "production"
+ALLOWED_ORIGINS = "https://searchbb.github.io"
+POW_DIFFICULTY = "12"
+MAX_SUBMISSIONS_PER_HOUR = "5"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "kfc-research-intake"
+database_id = "REPLACE_AFTER_WRANGLER_D1_CREATE"
+migrations_dir = "migrations"

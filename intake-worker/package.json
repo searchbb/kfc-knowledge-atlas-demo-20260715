@@ -1,0 +1,13 @@
+{
+  "name": "kfc-research-intake-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.25.0"
+  }
+}

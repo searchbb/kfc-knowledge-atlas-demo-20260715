@@ -155,6 +155,7 @@ def verify_public_site(
     expected_index_sha: str,
     expected_app_js_sha: str,
     expected_styles_sha: str,
+    expected_research_intake_config_sha: str,
     expected_detail_manifest_sha: str,
     expected_detail_sample_hashes: dict[str, str],
     expected_asset_hashes: dict[str, str],
@@ -165,6 +166,9 @@ def verify_public_site(
     index_url = f"{pages_url}?verify={cache_key}"
     app_js_url = f"{pages_url.rstrip('/')}/app.js?verify={cache_key}"
     styles_url = f"{pages_url.rstrip('/')}/styles.css?verify={cache_key}"
+    research_intake_config_url = (
+        f"{pages_url.rstrip('/')}/research-intake-config.js?verify={cache_key}"
+    )
     site_data_url = f"{pages_url.rstrip('/')}/data/site-data.json?verify={cache_key}"
     site_index_url = f"{pages_url.rstrip('/')}/data/site-index.json?verify={cache_key}"
     detail_manifest_url = f"{pages_url.rstrip('/')}/data/details-manifest.json?verify={cache_key}"
@@ -174,12 +178,14 @@ def verify_public_site(
             index_html = fetch_bytes(index_url)
             app_js = fetch_bytes(app_js_url)
             styles = fetch_bytes(styles_url)
+            research_intake_config = fetch_bytes(research_intake_config_url)
             site_data = fetch_bytes(site_data_url)
             site_index = fetch_bytes(site_index_url)
             detail_manifest = fetch_bytes(detail_manifest_url)
             remote_index_sha = sha256_bytes(index_html)
             remote_app_js_sha = sha256_bytes(app_js)
             remote_styles_sha = sha256_bytes(styles)
+            remote_research_intake_config_sha = sha256_bytes(research_intake_config)
             remote_sha = sha256_bytes(site_data)
             remote_site_index_sha = sha256_bytes(site_index)
             remote_detail_manifest_sha = sha256_bytes(detail_manifest)
@@ -208,6 +214,12 @@ def verify_public_site(
             if remote_styles_sha != expected_styles_sha:
                 raise ValueError(
                     f"remote styles.css sha mismatch: expected {expected_styles_sha}, got {remote_styles_sha}"
+                )
+            if remote_research_intake_config_sha != expected_research_intake_config_sha:
+                raise ValueError(
+                    "remote research intake config sha mismatch: "
+                    f"expected {expected_research_intake_config_sha}, "
+                    f"got {remote_research_intake_config_sha}"
                 )
             if remote_sha != expected_site_data_sha:
                 raise ValueError(
@@ -248,6 +260,7 @@ def verify_public_site(
                 "index_url": index_url,
                 "app_js_url": app_js_url,
                 "styles_url": styles_url,
+                "research_intake_config_url": research_intake_config_url,
                 "site_data_url": site_data_url,
                 "site_index_url": site_index_url,
                 "remote_site_data_sha256": remote_sha,
@@ -255,6 +268,7 @@ def verify_public_site(
                 "remote_index_sha256": remote_index_sha,
                 "remote_app_js_sha256": remote_app_js_sha,
                 "remote_styles_sha256": remote_styles_sha,
+                "remote_research_intake_config_sha256": remote_research_intake_config_sha,
                 "remote_detail_manifest_sha256": remote_detail_manifest_sha,
                 "remote_detail_sample_sha256": remote_detail_sample_hashes,
                 "remote_research_asset_sha256": remote_asset_hashes,
@@ -268,6 +282,7 @@ def verify_public_site(
         "attempt": attempts,
         "index_url": index_url,
         "app_js_url": app_js_url,
+        "research_intake_config_url": research_intake_config_url,
         "site_data_url": site_data_url,
         "site_index_url": site_index_url,
         "detail_manifest_url": detail_manifest_url,
@@ -314,6 +329,7 @@ def main() -> int:
     index_sha = sha256_file(SITE_ROOT / "index.html")
     app_js_sha = sha256_file(SITE_ROOT / "app.js")
     styles_sha = sha256_file(SITE_ROOT / "styles.css")
+    research_intake_config_sha = sha256_file(SITE_ROOT / "research-intake-config.js")
     detail_manifest_path = SITE_ROOT / "data" / "details-manifest.json"
     detail_manifest_sha = sha256_file(detail_manifest_path)
     detail_samples = detail_sample_hashes(detail_manifest_path)
@@ -347,6 +363,7 @@ def main() -> int:
             expected_index_sha=index_sha,
             expected_app_js_sha=app_js_sha,
             expected_styles_sha=styles_sha,
+            expected_research_intake_config_sha=research_intake_config_sha,
             expected_detail_manifest_sha=detail_manifest_sha,
             expected_detail_sample_hashes=detail_samples,
             expected_asset_hashes=asset_hashes,
@@ -376,6 +393,7 @@ def main() -> int:
         "index_sha256": index_sha,
         "app_js_sha256": app_js_sha,
         "styles_sha256": styles_sha,
+        "research_intake_config_sha256": research_intake_config_sha,
         "detail_manifest_sha256": detail_manifest_sha,
         "detail_sample_sha256": detail_samples,
         "research_asset_sha256": asset_hashes,
