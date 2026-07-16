@@ -7,7 +7,8 @@ test("research page has a native submission form with privacy rules", async ({ p
   const form = page.locator("#research-intake-form");
   await expect(form).toBeVisible();
   await expect(page.locator("#research-intake-title")).toHaveText("提交一个深度研究课题");
-  await expect(page.locator(".research-submit")).toBeDisabled();
+  await expect(page.locator(".research-submit")).toBeEnabled();
+  await expect(page.locator("#research-intake-status")).toContainText("请保存回执编号");
   await expect(page.locator("body")).not.toContainText("GitHub Issue");
   await page.locator('input[name="visibility"][value="private"]').check();
   await expect(page.locator('input[name="requester_email"]')).toHaveAttribute("required", "");

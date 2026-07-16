@@ -1,6 +1,8 @@
 name = "kfc-research-intake"
 main = "src/index.js"
 compatibility_date = "2026-07-16"
+workers_dev = true
+preview_urls = false
 
 [vars]
 ENVIRONMENT = "production"
@@ -11,5 +13,5 @@ MAX_SUBMISSIONS_PER_HOUR = "5"
 [[d1_databases]]
 binding = "DB"
 database_name = "kfc-research-intake"
-database_id = "REPLACE_AFTER_WRANGLER_D1_CREATE"
+database_id = "d1638733-4d87-4574-a17b-9ca5eb72fe81"
 migrations_dir = "migrations"

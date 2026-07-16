@@ -1,4 +1,4 @@
 window.KFC_RESEARCH_INTAKE = Object.freeze({
-  endpoint: "",
+  endpoint: "https://kfc-research-intake-proxy.pages.dev",
   targetMinutes: 60,
 });

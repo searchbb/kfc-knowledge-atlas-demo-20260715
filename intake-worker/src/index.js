@@ -158,12 +158,16 @@ async function parseJson(request) {
   }
 }
 
-function clientIp(request) {
+function clientIp(request, env) {
+  const proxySecret = request.headers.get("X-Intake-Proxy-Secret") || "";
+  if (env.PROXY_SHARED_SECRET && proxySecret === env.PROXY_SHARED_SECRET) {
+    return request.headers.get("X-Intake-Client-IP") || "unknown";
+  }
   return request.headers.get("CF-Connecting-IP") || request.headers.get("X-Test-IP") || "unknown";
 }
 
 async function ipHash(request, env) {
-  return hmacHex(env.RATE_SALT, clientIp(request));
+  return hmacHex(env.RATE_SALT, clientIp(request, env));
 }
 
 async function authorize(request, env) {

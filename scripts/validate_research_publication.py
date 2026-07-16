@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
+
+from research_publication import SHA256_RE, VERIFIED_ADMISSION, public_content_violation
 
 
 SITE_ROOT = Path(__file__).resolve().parents[1]
@@ -37,9 +40,29 @@ def main() -> int:
     audit = dict(dict(payload.get("buildMeta") or {}).get("publicationAudit") or {})
     excluded = int(dict(audit.get("research") or {}).get("excluded") or 0)
     assert len(reports) + excluded == expected_count, (len(reports), excluded, expected_count)
+    report_by_id = {str(row["id"]): row for row in reports}
+    verified_count = 0
     for row in manifest_rows:
         lowered = Path(row["path"]).name.lower()
         assert not any(marker in lowered for marker in EXCLUDED_MARKERS), row["path"]
+        if row.get("admission") != VERIFIED_ADMISSION:
+            continue
+        verified_count += 1
+        assert str(row["id"]) in report_by_id, row
+        assert SHA256_RE.fullmatch(str(row.get("sha256") or "")), row
+        published_at = str(row.get("published_at") or "")
+        parsed = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        assert parsed.tzinfo is not None, row
+        projected = report_by_id[str(row["id"])]
+        assert projected.get("updatedAt") == published_at, (projected, row)
+        assert projected.get("status") == "published", projected
+        violation = public_content_violation(
+            "\n".join(
+                str(projected.get(field) or "")
+                for field in ("html", "text", "summary", "canonicalQuestion")
+            )
+        )
+        assert not violation, (row["id"], violation)
     diagram_count = sum(int(row.get("diagramCount") or 0) for row in reports)
     local_images: list[str] = []
     missing_images: list[str] = []
@@ -68,6 +91,7 @@ def main() -> int:
         "staged_png_count": len(asset_files),
         "missing_image_count": 0,
         "process_artifacts_published": 0,
+        "verified_admission_count": verified_count,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

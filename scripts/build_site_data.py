@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 import markdown
 from portal_schema import PORTAL_SCHEMA_VERSION, schema_descriptor, validate_portal_payload
 from public_release_policy import partition_public_items
+from research_publication import VERIFIED_ADMISSION, validate_verified_manifest_row
 
 
 TOPIC_SECTION_RE = re.compile(r"^## TOPIC: (?P<title>.+)$", re.MULTILINE)
@@ -560,11 +561,15 @@ def parse_news_rows(*, repo_root: Path, article_ids: set[str], limit: int) -> tu
     return news_rows, total_count
 
 
-def research_candidates(repo_root: Path) -> list[tuple[dict[str, str], Path]]:
-    manifest = read_json(RESEARCH_MANIFEST)
+def research_candidates(
+    repo_root: Path,
+    manifest_path: Path = RESEARCH_MANIFEST,
+) -> list[tuple[dict[str, str], Path]]:
+    repo_root = repo_root.expanduser().resolve()
+    manifest = read_json(manifest_path)
     rows = manifest.get("reports") or []
     if not isinstance(rows, list) or not rows:
-        raise ValueError(f"research publication manifest is empty: {RESEARCH_MANIFEST}")
+        raise ValueError(f"research publication manifest is empty: {manifest_path}")
     candidates: list[tuple[dict[str, str], Path]] = []
     seen_ids: set[str] = set()
     seen_paths: set[Path] = set()
@@ -585,6 +590,8 @@ def research_candidates(repo_root: Path) -> list[tuple[dict[str, str], Path]]:
             raise ValueError(f"duplicate research path in manifest: {relative_path}")
         if not source_path.is_file():
             raise FileNotFoundError(f"research report does not exist: {relative_path}")
+        if row.get("admission") == VERIFIED_ADMISSION:
+            validate_verified_manifest_row(row, repo_root=repo_root)
         seen_ids.add(report_id)
         seen_paths.add(source_path)
         candidates.append((row, source_path))
