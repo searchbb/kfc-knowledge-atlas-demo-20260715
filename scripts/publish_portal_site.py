@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import gzip
 import hashlib
 import http.client
 import json
@@ -13,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from sync_portal_data import SITE_ROOT, find_repo_root, now_iso, sha256_file, summarize_payload
 
@@ -138,8 +139,12 @@ def detail_sample_hashes(manifest_path: Path) -> dict[str, str]:
 
 
 def fetch_bytes(url: str, *, timeout_seconds: int = 20) -> bytes:
-    with urlopen(url, timeout=timeout_seconds) as response:  # noqa: S310 - fixed public URL verification
-        return response.read()
+    request = Request(url, headers={"Accept-Encoding": "gzip"})
+    with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - fixed public URL verification
+        payload = response.read()
+        if str(response.headers.get("Content-Encoding") or "").lower() == "gzip":
+            return gzip.decompress(payload)
+        return payload
 
 
 def verify_public_site(
@@ -179,7 +184,7 @@ def verify_public_site(
             remote_site_index_sha = sha256_bytes(site_index)
             remote_detail_manifest_sha = sha256_bytes(detail_manifest)
             if not re.search(
-                rb'<script\s+type="module"\s+src="\./app\.js(?:\?[^"<>]*)?"></script>',
+                rb'<script(?=[^>]*\btype="module")(?=[^>]*\bsrc="\./app\.js(?:\?[^"<>]*)?")[^>]*></script>',
                 index_html,
             ):
                 raise ValueError("index.html does not reference app.js")

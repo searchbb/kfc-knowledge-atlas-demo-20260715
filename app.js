@@ -1,5 +1,3 @@
-import { searchRoute, searchTopMatches } from "./scripts/search-ranking.mjs";
-
 const state = {
   data: null,
   timelineType: "all",
@@ -9,6 +7,7 @@ const state = {
   detailCache: new Map(),
   indexLoadId: 0,
   searchBound: false,
+  searchTools: null,
 };
 const contentEl = document.getElementById("content");
 const statsEl = document.getElementById("stats");
@@ -170,9 +169,15 @@ function routeHref(type, id = "") {
 }
 
 function bindSearch() {
-  searchInput.addEventListener("input", () => {
+  searchInput.addEventListener("input", async () => {
     const query = searchInput.value.trim();
     if (!query) return (searchResults.innerHTML = "");
+    if (!state.searchTools) {
+      searchResults.innerHTML = '<div class="search-hit"><span>正在准备搜索…</span></div>';
+      state.searchTools = await import("./scripts/search-ranking.mjs");
+      if (searchInput.value.trim() !== query) return;
+    }
+    const { searchRoute, searchTopMatches } = state.searchTools;
     const matches = searchTopMatches(state.data, query, 10);
     searchResults.innerHTML = matches.length
       ? matches.map(({ item, snippetText }) => `
