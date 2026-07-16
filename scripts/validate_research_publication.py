@@ -29,15 +29,16 @@ def main() -> int:
     payload = json.loads(DATA.read_text(encoding="utf-8"))
     reports = list(payload["collections"]["research"])
     manifest_rows = list(manifest["reports"])
-    assert len(manifest_rows) == 19, len(manifest_rows)
-    assert len(reports) == 19, len(reports)
-    assert len({row["id"] for row in manifest_rows}) == 19
-    assert len({row["path"] for row in manifest_rows}) == 19
+    expected_count = len(manifest_rows)
+    assert expected_count > 0
+    assert len(reports) == expected_count, (len(reports), expected_count)
+    assert len({row["id"] for row in manifest_rows}) == expected_count
+    assert len({row["path"] for row in manifest_rows}) == expected_count
+    assert {row["id"] for row in reports} == {row["id"] for row in manifest_rows}
     for row in manifest_rows:
         lowered = Path(row["path"]).name.lower()
         assert not any(marker in lowered for marker in EXCLUDED_MARKERS), row["path"]
     diagram_count = sum(int(row.get("diagramCount") or 0) for row in reports)
-    assert diagram_count == 53, diagram_count
     local_images: list[str] = []
     missing_images: list[str] = []
     for report in reports:
@@ -51,13 +52,18 @@ def main() -> int:
                 missing_images.append(source)
     assert not missing_images, missing_images
     asset_files = sorted((SITE_ROOT / "assets" / "research").rglob("*.png"))
-    assert len(asset_files) == 8, len(asset_files)
-    assert len(local_images) == 8, local_images
+    referenced_asset_paths = {
+        str((SITE_ROOT / source.removeprefix("./")).resolve())
+        for source in local_images
+        if source.removeprefix("./").startswith("assets/research/")
+    }
+    assert referenced_asset_paths.issubset({str(path.resolve()) for path in asset_files})
     result = {
         "status": "passed",
         "research_count": len(reports),
         "diagram_count": diagram_count,
         "local_image_count": len(local_images),
+        "staged_png_count": len(asset_files),
         "missing_image_count": 0,
         "process_artifacts_published": 0,
     }

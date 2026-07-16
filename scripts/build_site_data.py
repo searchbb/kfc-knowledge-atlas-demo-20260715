@@ -426,6 +426,7 @@ def parse_research_report(
     report_id: str,
     category: str,
     asset_stage_root: Path,
+    published_at: str = "",
 ) -> dict:
     raw = path.read_text(encoding="utf-8")
     raw = stage_research_images(
@@ -445,8 +446,8 @@ def parse_research_report(
         "category": category,
         "topicId": None,
         "status": "published",
-        "updatedAt": None,
-        "createdAt": None,
+        "updatedAt": published_at or None,
+        "createdAt": published_at or None,
         "canonicalQuestion": "",
         "path": str(path),
         "mtime": isoformat_from_mtime(path),
@@ -909,6 +910,7 @@ def main() -> None:
             report_id=row["id"],
             category=row.get("category", "深度研究"),
             asset_stage_root=research_asset_stage,
+            published_at=str(row.get("published_at") or ""),
         )
         for row, source_path in research_sources
     ]
