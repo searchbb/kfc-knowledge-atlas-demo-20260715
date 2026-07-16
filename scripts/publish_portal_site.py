@@ -7,6 +7,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -173,7 +174,10 @@ def verify_public_site(
             remote_styles_sha = sha256_bytes(styles)
             remote_sha = sha256_bytes(site_data)
             remote_detail_manifest_sha = sha256_bytes(detail_manifest)
-            if b'<script type="module" src="./app.js"></script>' not in index_html:
+            if not re.search(
+                rb'<script\s+type="module"\s+src="\./app\.js(?:\?[^"<>]*)?"></script>',
+                index_html,
+            ):
                 raise ValueError("index.html does not reference app.js")
             if b'fetch("./data/site-data.json"' not in app_js:
                 raise ValueError("app.js does not fetch site-data.json")
