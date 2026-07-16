@@ -45,6 +45,45 @@ test("public framing, Chinese navigation, and news-first ordering are correct", 
   await expect(page.locator(".lead-story")).toBeVisible();
 });
 
+test("navigation has one primary path and a mobile-safe overview", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${baseURL}#home`);
+  await expect(page.locator(".nav a")).toHaveCount(8);
+  await expect(page.locator(".nav a").first()).toHaveText("新闻资讯");
+  await expect(page.locator("#stats")).toBeVisible();
+  await expect(page.locator(".stats-title")).toHaveText("内容规模");
+  await expect(page.locator("#stats .stat")).toHaveCount(6);
+  await expect(page.locator("#stats a")).toHaveCount(0);
+  await page.screenshot({ path: path.join(siteRoot, "output/playwright/navigation-desktop-final.png"), fullPage: true });
+
+  await page.goto(`${baseURL}#news`);
+  await expect(page.locator("#stats")).toBeHidden();
+  await expect(page.locator('.nav a[href="#news"]')).toHaveClass(/active/);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseURL}#home`);
+  await expect(page.locator(".sidebar > section")).toBeHidden();
+  const mobileLayout = await page.evaluate(() => {
+    const nav = document.querySelector(".nav");
+    const first = document.querySelector(".nav a").getBoundingClientRect();
+    const sidebar = document.querySelector(".sidebar").getBoundingClientRect();
+    return {
+      navScrollLeft: nav.scrollLeft,
+      firstLeft: first.left,
+      firstRight: first.right,
+      sidebarHeight: sidebar.height,
+      viewportWidth: window.innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    };
+  });
+  expect(mobileLayout.navScrollLeft).toBeLessThanOrEqual(1);
+  expect(mobileLayout.firstLeft).toBeGreaterThanOrEqual(0);
+  expect(mobileLayout.firstRight).toBeLessThanOrEqual(mobileLayout.viewportWidth);
+  expect(mobileLayout.sidebarHeight).toBeLessThan(220);
+  expect(mobileLayout.scrollWidth).toBe(mobileLayout.viewportWidth);
+  await page.screenshot({ path: path.join(siteRoot, "output/playwright/navigation-mobile-final.png"), fullPage: true });
+});
+
 test("all seven detail protocols open the expected asset", async ({ page }) => {
   const cases = [["topic", data.topics[0]], ["issue", data.issues[0]], ["card", data.cards[0]], ["research", data.research[0]], ["article", data.articles[0]], ["news", data.news[0]]];
   for (const [type, item] of cases) {

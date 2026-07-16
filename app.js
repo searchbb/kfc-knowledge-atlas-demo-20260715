@@ -132,10 +132,12 @@ function renderStats() {
     ["综合研判", stats.cards, "cards"],
     ["文章解读", stats.articles, "articles"],
   ];
-  statsEl.innerHTML = rows.map(([label, value, route]) => `
-    <a class="stat" href="#${route}">
-      <p>${label}</p><strong>${Number(value || 0).toLocaleString("zh-CN")}</strong>
-    </a>`).join("");
+  statsEl.innerHTML = `
+    <p class="stats-title">内容规模</p>
+    ${rows.map(([label, value]) => `
+      <div class="stat">
+        <p>${label}</p><strong>${Number(value || 0).toLocaleString("zh-CN")}</strong>
+      </div>`).join("")}`;
 }
 
 function renderTopicNav() {
@@ -150,6 +152,7 @@ function renderRoute() {
   searchResults.innerHTML = "";
   updateRouteMode();
   const { route, id } = routeParts();
+  statsEl.hidden = route !== "home";
   setActiveNav(route);
   if (route === "home") return renderHome();
   if (route === "timeline") return renderTimeline();
@@ -163,7 +166,6 @@ function setActiveNav(route) {
   document.querySelectorAll(".nav a").forEach((link) => {
     const active = link.getAttribute("href") === `#${listRoute}`;
     link.classList.toggle("active", active);
-    if (active) link.scrollIntoView({ block: "nearest", inline: "center" });
   });
 }
 
