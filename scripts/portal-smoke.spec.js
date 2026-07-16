@@ -111,5 +111,5 @@ test("mobile layout remains readable", async ({ page }) => {
   await expect(page.locator("h2")).toContainText("AI 资讯观察");
   await expect(page.locator(".nav a").first()).toHaveText("新闻资讯");
   await expect(page.locator(".lead-story")).toBeVisible();
-  await page.screenshot({ path: path.join(siteRoot, "portal-mobile-smoke.png"), fullPage: true });
+  await page.screenshot({ path: path.join(siteRoot, "output/playwright/portal-mobile-smoke.png"), fullPage: true });
 });
