@@ -26,7 +26,8 @@
         addEventListener("hashchange", syncRouteMode);
       })();
     </script>
-    <link rel="stylesheet" href="./styles.css?v=20260716-fast-index-1" />
+    <link rel="preload" href="./styles.css?v=20260716-route-index-1" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link rel="stylesheet" href="./styles.css?v=20260716-route-index-1" /></noscript>
   </head>
   <body>
     <div class="shell">
@@ -157,6 +158,6 @@
           .catch(() => null);
       })();
     </script>
-    <script type="module" async src="./app.js?v=20260716-fast-index-2"></script>
+    <script type="module" async src="./app.js?v=20260716-route-index-1"></script>
   </body>
 </html>

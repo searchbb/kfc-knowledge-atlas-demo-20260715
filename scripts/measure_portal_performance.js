@@ -41,6 +41,7 @@ async function runAttempt(browser, profile, attempt) {
   const detailMs = Math.round(performance.now() - detailStarted);
   const siteDataRequests = requests.filter((url) => url.includes("/data/site-data.json"));
   const indexRequests = requests.filter((url) => url.includes("/data/site-index.json"));
+  const routeHomeRequests = requests.filter((url) => url.includes("/data/route-home.json"));
   const detailRequests = requests.filter((url) => url.includes("/data/details/"));
   const passed = skeletonMs <= profile.limits.skeleton
     && homeMs <= profile.limits.home
@@ -48,7 +49,8 @@ async function runAttempt(browser, profile, attempt) {
     && skeletonVisible
     && navigationInteractive
     && siteDataRequests.length === 0
-    && indexRequests.length === 1
+    && indexRequests.length === 0
+    && routeHomeRequests.length === 1
     && detailRequests.length >= 1;
   await page.screenshot({
     path: path.join(siteRoot, `output/playwright/performance-${profile.name}-${attempt}.png`),
@@ -64,6 +66,7 @@ async function runAttempt(browser, profile, attempt) {
     navigation_interactive: navigationInteractive,
     site_data_requests: siteDataRequests,
     site_index_request_count: indexRequests.length,
+    route_home_request_count: routeHomeRequests.length,
     detail_request_count: detailRequests.length,
     passed,
   };

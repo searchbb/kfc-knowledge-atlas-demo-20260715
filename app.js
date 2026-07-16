@@ -8,6 +8,8 @@ const state = {
   indexLoadId: 0,
   searchBound: false,
   searchTools: null,
+  searchReadyPromise: null,
+  loadedRoutes: new Set(),
 };
 const contentEl = document.getElementById("content");
 const statsEl = document.getElementById("stats");
@@ -70,16 +72,38 @@ async function fetchJson(url, { timeoutMs = 10000 } = {}) {
   }
 }
 
-async function loadIndexData() {
-  return normalizeData(await fetchJson("./data/site-index.json"));
+function emptyData() {
+  return normalizeData({ collections: {} });
+}
+
+function mergeData(raw) {
+  const incoming = normalizeData(raw);
+  if (!state.data) state.data = emptyData();
+  for (const name of ["topics", "issues", "cards", "research", "articles", "news"]) {
+    if (Object.hasOwn(raw.collections || raw, name)) state.data[name] = incoming[name];
+  }
+  for (const name of ["stats", "newsMeta", "relations", "timeline", "buildMeta", "generatedAt"]) {
+    if (Object.hasOwn(raw, name)) state.data[name] = incoming[name];
+  }
+  return state.data;
+}
+
+function routeDataUrl(route) {
+  if (route === "home" || route === "timeline" || Object.values(ROUTES).includes(route)) {
+    return `./data/route-${route}.json`;
+  }
+  return "";
 }
 
 async function init() {
-  searchInput.disabled = true;
+  state.data = emptyData();
+  bindSearch();
+  state.searchBound = true;
+  searchInput.disabled = false;
   updateRouteMode();
   window.addEventListener("hashchange", () => {
     updateRouteMode();
-    if (state.data) void renderRoute();
+    void renderRoute();
   });
   state.fastDetail = await loadFastDetail();
   if (state.fastDetail) {
@@ -90,31 +114,27 @@ async function init() {
   } else {
     renderPortalLoading();
   }
-  await loadPortalIndex();
+  if (!state.fastDetail) await renderRoute();
 }
 
-async function loadPortalIndex() {
+async function ensureRouteData(route) {
+  const url = routeDataUrl(route);
+  if (!url || state.loadedRoutes.has(route)) return true;
   const loadId = ++state.indexLoadId;
+  renderPortalLoading();
   const slowTimer = window.setTimeout(showSlowLoadingNote, 2500);
   try {
-    const data = await loadIndexData();
+    const data = await fetchJson(url, { timeoutMs: 15000 });
     if (loadId !== state.indexLoadId) return;
-    state.data = data;
-    renderStats();
-    renderTopicNav();
-    if (!state.searchBound) {
-      bindSearch();
-      state.searchBound = true;
-    }
-    searchInput.disabled = false;
-    await renderRoute();
+    mergeData(data);
+    state.loadedRoutes.add(route);
+    if (route === "home") renderStats();
+    if (route === "home" || route === "topics") renderTopicNav();
+    return true;
   } catch (error) {
     if (loadId !== state.indexLoadId) return;
-    if (state.fastDetail) {
-      searchInput.placeholder = "全站索引暂未加载，当前详情仍可阅读";
-      return;
-    }
-    renderLoadError(error, () => void loadPortalIndex());
+    renderLoadError(error, () => void renderRoute());
+    return false;
   } finally {
     window.clearTimeout(slowTimer);
   }
@@ -174,7 +194,21 @@ function bindSearch() {
     if (!query) return (searchResults.innerHTML = "");
     if (!state.searchTools) {
       searchResults.innerHTML = '<div class="search-hit"><span>正在准备搜索…</span></div>';
-      state.searchTools = await import("./scripts/search-ranking.mjs");
+      try {
+        if (!state.searchReadyPromise) {
+          state.searchReadyPromise = Promise.all([
+            fetchJson("./data/site-index.json", { timeoutMs: 30000 }),
+            import("./scripts/search-ranking.mjs"),
+          ]);
+        }
+        const [fullIndex, tools] = await state.searchReadyPromise;
+        mergeData(fullIndex);
+        state.searchTools = tools;
+      } catch (error) {
+        state.searchReadyPromise = null;
+        searchResults.innerHTML = `<div class="search-hit"><span>搜索数据加载失败，请稍后重试</span></div>`;
+        return;
+      }
       if (searchInput.value.trim() !== query) return;
     }
     const { searchRoute, searchTopMatches } = state.searchTools;
@@ -221,9 +255,11 @@ async function renderRoute() {
   const { route, id } = routeParts();
   statsEl.hidden = route !== "home";
   setActiveNav(route);
+  if (id && Object.hasOwn(ROUTES, route)) return renderDetailRoute(route, id);
+  const ready = await ensureRouteData(route);
+  if (!ready) return;
   if (route === "home") return renderHome();
   if (route === "timeline") return renderTimeline();
-  if (id && Object.hasOwn(ROUTES, route)) return renderDetailRoute(route, id);
   if (Object.values(ROUTES).includes(route)) return renderAssetIndex(route, state.data[route]);
   renderMissing();
 }

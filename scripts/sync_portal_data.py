@@ -37,6 +37,7 @@ INDEX_SUMMARY_LIMITS = {
     "cards": 600,
     "topics": 600,
 }
+ROUTE_COLLECTIONS = ("topics", "issues", "cards", "research", "articles", "news")
 
 
 def now_iso() -> str:
@@ -101,6 +102,90 @@ def build_site_index(payload: dict[str, object]) -> dict[str, object]:
     }
 
 
+def route_payload_base(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        "schemaVersion": payload.get("schemaVersion"),
+        "generatedAt": payload.get("generatedAt"),
+        "routeIndexVersion": 1,
+        "buildMeta": payload.get("buildMeta") or {},
+    }
+
+
+def write_atomic_json(path: Path, payload: dict[str, object]) -> dict[str, object]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        prefix=f".{path.stem}-",
+        suffix=".json",
+        dir=str(path.parent),
+        delete=False,
+    ) as handle:
+        temp_path = Path(handle.name)
+        json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+    try:
+        raw_bytes = temp_path.read_bytes()
+        temp_path.replace(path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+    return {
+        "path": str(path),
+        "sha256": sha256_file(path),
+        "bytes": len(raw_bytes),
+        "gzip_bytes": len(gzip.compress(raw_bytes, compresslevel=9, mtime=0)),
+    }
+
+
+def build_route_indexes(index_payload: dict[str, object], output_root: Path) -> dict[str, object]:
+    collections = dict(index_payload.get("collections") or {})
+    base = route_payload_base(index_payload)
+    files: dict[str, dict[str, object]] = {}
+
+    # 首页只需要少量近期内容；各栏目进入时再取自己的完整轻量列表。
+    recent_news = sorted(
+        list(collections.get("news") or []),
+        key=lambda item: str(
+            item.get("publishedAt") or item.get("updatedAt") or item.get("mtime") or ""
+        ),
+        reverse=True,
+    )[:30]
+    home_payload = {
+        **base,
+        "route": "home",
+        "stats": index_payload.get("stats") or {},
+        "newsMeta": index_payload.get("newsMeta") or {},
+        "collections": {
+            "topics": list(collections.get("topics") or []),
+            "research": list(collections.get("research") or []),
+            "news": recent_news,
+        },
+    }
+    files["home"] = write_atomic_json(output_root / "route-home.json", home_payload)
+
+    for name in ROUTE_COLLECTIONS:
+        route_payload = {
+            **base,
+            "route": name,
+            "collections": {name: list(collections.get(name) or [])},
+        }
+        if name == "news":
+            route_payload["newsMeta"] = index_payload.get("newsMeta") or {}
+        files[name] = write_atomic_json(output_root / f"route-{name}.json", route_payload)
+
+    timeline_payload = {
+        **base,
+        "route": "timeline",
+        "timeline": index_payload.get("timeline") or [],
+    }
+    files["timeline"] = write_atomic_json(output_root / "route-timeline.json", timeline_payload)
+    return {
+        "status": "success",
+        "files": files,
+        "max_gzip_bytes": max(int(item["gzip_bytes"]) for item in files.values()),
+    }
+
+
 def sync_site_index(*, payload_path: Path, index_path: Path) -> dict[str, object]:
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
     index_payload = build_site_index(payload)
@@ -121,6 +206,7 @@ def sync_site_index(*, payload_path: Path, index_path: Path) -> dict[str, object
     finally:
         if temp_index.exists():
             temp_index.unlink()
+    route_indexes = build_route_indexes(index_payload, index_path.parent)
     return {
         "status": "success",
         "path": str(index_path),
@@ -130,6 +216,7 @@ def sync_site_index(*, payload_path: Path, index_path: Path) -> dict[str, object
         "counts": {
             name: len(rows) for name, rows in index_payload["collections"].items()
         },
+        "route_indexes": route_indexes,
     }
 
 
