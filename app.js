@@ -40,23 +40,27 @@ function bindSearch() {
       searchResults.innerHTML = "";
       return;
     }
-    const pool = [...state.data.issues, ...state.data.cards, ...state.data.research];
+    const pool = [
+      ...state.data.topics.map((item) => ({ ...item, type: "topic" })),
+      ...state.data.issues,
+      ...state.data.cards,
+      ...state.data.research,
+      ...state.data.articles,
+    ];
     const matches = pool
-      .filter((item) =>
-        [item.title, item.id, item.canonicalQuestion || "", item.text]
-          .join(" ")
-          .toLowerCase()
-          .includes(query),
-      )
+      .map((item) => ({ item, score: searchScore(item, query) }))
+      .filter(({ score }) => score > 0)
+      .sort((left, right) => right.score - left.score)
+      .map(({ item }) => item)
       .slice(0, 8);
 
     searchResults.innerHTML = matches.length
       ? matches
           .map(
             (item) => `
-              <a class="search-hit" href="#${item.type}/${item.id}">
+              <a class="search-hit" href="#${searchRoute(item)}/${item.id}">
                 <strong>${escapeHtml(item.title)}</strong>
-                <span>${item.type.toUpperCase()} · ${escapeHtml(item.id)} · ${escapeHtml(snippet(item.text, query))}</span>
+                <span>${item.type.toUpperCase()} · ${escapeHtml(item.id)} · ${escapeHtml(snippet(searchSnippetText(item), query))}</span>
               </a>
             `,
           )
@@ -112,8 +116,14 @@ function renderRoute() {
     case "topic":
       renderTopicDetail(id);
       break;
+    case "articles":
+      renderAssetIndex("articles", state.data.articles, "Article 详情");
+      break;
     case "issues":
       renderAssetIndex("issues", state.data.issues, "Issue 详情");
+      break;
+    case "article":
+      renderArticleDetail(state.data.articles.find((item) => item.id === id));
       break;
     case "issue":
       renderAssetDetail(state.data.issues.find((item) => item.id === id), "Issue");
@@ -277,6 +287,40 @@ function renderAssetDetail(item, label) {
   `;
 }
 
+function renderArticleDetail(item) {
+  if (!item) return renderMissing();
+  contentEl.innerHTML = `
+    <section class="detail">
+      <p class="eyebrow">Article</p>
+      <h3>${escapeHtml(item.title)}</h3>
+      <div class="meta-strip">
+        <span>${escapeHtml(item.id)}</span>
+        ${item.status ? `<span>${escapeHtml(item.status)}</span>` : ""}
+        ${item.sourceId ? `<span>${escapeHtml(item.sourceId)}</span>` : ""}
+        ${item.publishedAt ? `<span>published ${escapeHtml(formatTime(item.publishedAt))}</span>` : ""}
+        ${item.updatedAt ? `<span>updated ${escapeHtml(formatTime(item.updatedAt))}</span>` : ""}
+      </div>
+      ${
+        item.summary
+          ? `<p>${escapeHtml(item.summary)}</p>`
+          : `<p>当前 article 未提供 summary，可根据原始来源继续追溯。</p>`
+      }
+      <div class="pill-row">
+        ${
+          item.url
+            ? `<a class="pill" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">打开原始链接</a>`
+            : ""
+        }
+        ${
+          item.path
+            ? `<span class="pill">本地路径：${escapeHtml(item.path)}</span>`
+            : ""
+        }
+      </div>
+    </section>
+  `;
+}
+
 function renderTimeline() {
   contentEl.innerHTML = `
     <section class="list-panel">
@@ -311,13 +355,85 @@ function assetRow(item, routeType) {
 }
 
 function timelineRow(item) {
-  const route = item.type === "research" ? "researchpack" : item.type;
+  const route = searchRoute(item);
   return `
     <a class="list-link" href="#${route}/${item.id}">
       <strong>${escapeHtml(item.title)}</strong>
       <span>${escapeHtml(item.type)} · ${escapeHtml(formatTime(item.updatedAt))}</span>
     </a>
   `;
+}
+
+function searchDocument(item) {
+  const parts = [item.title, item.id];
+  if (item.type === "topic") {
+    parts.push(item.status || "");
+    parts.push(...(item.activeIssueIds || []));
+    parts.push(...(item.relatedCardIds || []));
+    parts.push(...(item.relatedResearchIds || []));
+  } else if (item.type === "article") {
+    parts.push(item.summary || "");
+    parts.push(item.sourceId || "");
+    parts.push(item.url || "");
+  } else {
+    parts.push(item.canonicalQuestion || "");
+    parts.push(item.text || "");
+  }
+  return parts.join(" ").toLowerCase();
+}
+
+function searchScore(item, query) {
+  const title = (item.title || "").toLowerCase();
+  const id = (item.id || "").toLowerCase();
+  const canonicalQuestion = (item.canonicalQuestion || "").toLowerCase();
+  const summary = (item.summary || "").toLowerCase();
+  const text = (item.text || "").toLowerCase();
+  const document = searchDocument(item);
+
+  if (!document.includes(query)) {
+    return 0;
+  }
+
+  let score = typePriority(item.type);
+  if (title === query) score += 200;
+  if (title.includes(query)) score += 120;
+  if (id === query) score += 100;
+  if (id.includes(query)) score += 80;
+  if (canonicalQuestion.includes(query)) score += 60;
+  if (summary.includes(query)) score += 40;
+  if (text.includes(query)) score += 20;
+  return score;
+}
+
+function searchSnippetText(item) {
+  if (item.type === "topic") {
+    return [item.title, item.status || "", ...(item.activeIssueIds || [])].join(" ");
+  }
+  if (item.type === "article") {
+    return [item.summary || "", item.sourceId || ""].join(" ");
+  }
+  return item.text || item.canonicalQuestion || item.title || "";
+}
+
+function searchRoute(item) {
+  return item.type === "research" ? "researchpack" : item.type;
+}
+
+function typePriority(type) {
+  switch (type) {
+    case "card":
+      return 8;
+    case "research":
+      return 7;
+    case "article":
+      return 6;
+    case "topic":
+      return 5;
+    case "issue":
+      return 4;
+    default:
+      return 0;
+  }
 }
 
 function empty(text) {
