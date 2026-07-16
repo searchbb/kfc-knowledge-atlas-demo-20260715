@@ -231,6 +231,8 @@ button, input { font: inherit; }
 .filter.active { border-color: var(--navy); background: var(--navy); color: white; }
 .question, .summary { margin-top: 18px; padding: 14px 16px; border-left: 4px solid var(--red); background: var(--soft); }
 .question p, .summary p { margin-bottom: 0; color: var(--muted); line-height: 1.65; }
+.detail-loading { min-height: 180px; }
+.loading-copy { margin: 18px 0 0; color: var(--muted); font-size: 1rem; }
 .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .pill { padding: 7px 10px; border: 1px solid var(--navy); color: var(--navy); font-size: .84rem; font-weight: 700; }
 

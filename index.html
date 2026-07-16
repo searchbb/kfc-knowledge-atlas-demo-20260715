@@ -14,7 +14,7 @@
         addEventListener("hashchange", syncRouteMode);
       })();
     </script>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260716-fast-detail-2" />
   </head>
   <body>
     <div class="shell">
@@ -65,6 +65,71 @@
         <section id="content" class="content-panel"></section>
       </main>
     </div>
-    <script type="module" src="./app.js"></script>
+    <script>
+      (() => {
+        const match = location.hash.match(/^#(topic|issue|card|research|article|news)\/(.+)$/);
+        if (!match) return;
+        const type = match[1];
+        const id = decodeURIComponent(match[2]);
+        const content = document.getElementById("content");
+        const labels = {
+          topic: "专题观察", issue: "分析卡片", card: "综合研判",
+          research: "深度研究", article: "文章解读", news: "新闻资讯",
+        };
+
+        const loading = document.createElement("section");
+        loading.className = "detail detail-loading";
+        const loadingLabel = document.createElement("p");
+        loadingLabel.className = "eyebrow";
+        loadingLabel.textContent = labels[type];
+        const loadingText = document.createElement("p");
+        loadingText.className = "loading-copy";
+        loadingText.textContent = "正在加载标题与摘要…";
+        loading.append(loadingLabel, loadingText);
+        content.replaceChildren(loading);
+
+        const renderBootstrapDetail = (fastDetail) => {
+          const item = fastDetail.item;
+          const section = document.createElement("section");
+          section.className = "detail detail-header bootstrap-detail";
+          const heading = document.createElement("div");
+          heading.className = "detail-title";
+          const headingBody = document.createElement("div");
+          const label = document.createElement("p");
+          label.className = "eyebrow";
+          label.textContent = labels[type];
+          const title = document.createElement("h3");
+          title.textContent = item.title || "未命名内容";
+          headingBody.append(label, title);
+          heading.append(headingBody);
+          section.append(heading);
+          if (item.summary) {
+            const summary = document.createElement("div");
+            summary.className = "summary";
+            const strong = document.createElement("strong");
+            strong.textContent = "内容摘要";
+            const paragraph = document.createElement("p");
+            paragraph.textContent = item.summary;
+            summary.append(strong, paragraph);
+            section.append(summary);
+          }
+          content.replaceChildren(section);
+        };
+
+        window.__fastDetailPromise = fetch(
+          `./data/details/${type}/${encodeURIComponent(id)}.json`,
+          { cache: "no-store" },
+        )
+          .then((response) => response.ok ? response.json() : null)
+          .then((payload) => {
+            if (!payload || payload.type !== type || payload.id !== id || !payload.item) return null;
+            const fastDetail = { type, id, item: payload.item };
+            renderBootstrapDetail(fastDetail);
+            return fastDetail;
+          })
+          .catch(() => null);
+      })();
+    </script>
+    <script type="module" src="./app.js?v=20260716-fast-detail-2"></script>
   </body>
 </html>

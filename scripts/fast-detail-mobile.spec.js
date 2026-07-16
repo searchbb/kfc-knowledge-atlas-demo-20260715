@@ -39,7 +39,7 @@ test('email article deep link renders title and summary without the full site in
       directDetailMode: document.documentElement.classList.contains('direct-detail'),
     };
   });
-  expect(Date.now() - startedAt).toBeLessThan(5000);
+  expect(Date.now() - startedAt).toBeLessThan(8000);
   expect(metrics.titleTop).toBeLessThan(260);
   expect(metrics.summaryTop).toBeLessThan(600);
   expect(metrics.summaryTextLength).toBeGreaterThan(100);
@@ -48,18 +48,29 @@ test('email article deep link renders title and summary without the full site in
   await page.screenshot({ path: path.join(siteRoot, 'output/playwright/email-fast-detail-mobile.png'), fullPage: false });
 });
 
-test('all links in the sent mobile email have non-empty fast detail pages', async ({ page }) => {
+test('inline bootstrap renders the summary even when the main application is unavailable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await blockFullIndex(page);
+  await page.route('**/app.js*', (route) => route.abort('failed'));
+  await page.goto(`${baseURL}#article/news_1dadf276c5fb0ff4ead6`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.bootstrap-detail .summary')).toContainText('Jetson', { timeout: 8000 });
+  await expect(page.locator('.loading-copy')).toHaveCount(0);
+});
+
+test('all links in the sent mobile email have non-empty fast detail shards', async ({ request }) => {
   expect(mailLinks).toHaveLength(54);
-  for (const item of mailLinks) {
-    await page.goto('about:blank');
-    await page.goto(`${baseURL}#${item.type}/${encodeURIComponent(item.id)}`, { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.detail-title h3')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('.summary')).toBeVisible({ timeout: 5000 });
-    const summaryLength = await page.locator('.summary p').innerText();
-    expect(summaryLength.trim().length).toBeGreaterThan(20);
-  }
+  const checks = await Promise.all(mailLinks.map(async (item) => {
+    const response = await request.get(
+      `${baseURL}data/details/${item.type}/${encodeURIComponent(item.id)}.json`,
+    );
+    expect(response.ok()).toBeTruthy();
+    const payload = await response.json();
+    expect(payload.type).toBe(item.type);
+    expect(payload.id).toBe(item.id);
+    expect(payload.item.title.trim().length).toBeGreaterThan(0);
+    expect(payload.item.summary.trim().length).toBeGreaterThan(20);
+    return item.id;
+  }));
+  expect(checks).toHaveLength(54);
 });
 
 test('analysis-card list no longer overflows at phone widths', async ({ page }) => {

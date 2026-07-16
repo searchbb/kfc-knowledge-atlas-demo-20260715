@@ -38,6 +38,10 @@ function emptyPortalData(type, item) {
 async function loadFastDetail() {
   const { route, id } = routeParts();
   if (!id || !Object.hasOwn(ROUTES, route)) return null;
+  if (window.__fastDetailPromise) {
+    const bootstrapped = await window.__fastDetailPromise;
+    if (bootstrapped?.type === route && bootstrapped?.id === id && bootstrapped.item) return bootstrapped;
+  }
   const response = await fetch(`./data/details/${route}/${encodeURIComponent(id)}.json`, { cache: "no-store" });
   if (!response.ok) return null;
   const payload = await response.json();
