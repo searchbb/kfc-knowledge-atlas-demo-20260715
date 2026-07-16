@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sqlite3
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import unescape
@@ -56,6 +58,40 @@ def first_nonempty(*values: str | None) -> str:
 
 def isoformat_from_mtime(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+
+
+def relative_source_ref(path_value: str, repo_root: Path) -> str:
+    path = Path(path_value)
+    try:
+        return path.resolve().relative_to(repo_root).as_posix()
+    except (OSError, ValueError):
+        return path.name
+
+
+def sanitize_public_text(value: str, repo_root: Path) -> str:
+    cleaned = value.replace(str(repo_root), "[repository]")
+    return re.sub(r"/Users/[^\s<>\"']+", "[local-path]", cleaned)
+
+
+def sanitize_public_payload(value, repo_root: Path):
+    if isinstance(value, dict):
+        return {key: sanitize_public_payload(item, repo_root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [sanitize_public_payload(item, repo_root) for item in value]
+    if isinstance(value, str):
+        return sanitize_public_text(value, repo_root)
+    return value
+
+
+def repo_revision(repo_root: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "--short=12", "HEAD"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout.strip() or "unversioned"
 
 
 def plain_text(html: str) -> str:
@@ -431,9 +467,19 @@ def build_relations(
 ) -> list[dict]:
     relations: list[dict] = []
     seen: set[tuple[str, str, str, str, str]] = set()
+    valid_ids = {
+        "topic": {item["id"] for item in topics},
+        "issue": {item["id"] for item in issues},
+        "card": {item["id"] for item in cards},
+        "research": {item["id"] for item in research},
+        "article": {item["id"] for item in articles},
+        "news": {item["id"] for item in news},
+    }
 
     def add_relation(relation_type: str, from_type: str, from_id: str, to_type: str, to_id: str) -> None:
         if not from_id or not to_id:
+            return
+        if from_id not in valid_ids.get(from_type, set()) or to_id not in valid_ids.get(to_type, set()):
             return
         key = (relation_type, from_type, from_id, to_type, to_id)
         if key in seen:
@@ -451,10 +497,13 @@ def build_relations(
         )
 
     for topic in topics:
+        issue_ids = {item["id"] for item in issues}
         for issue_id in topic["issueIds"]:
-            add_relation("topic_issue_declared", "topic", topic["id"], "issue", issue_id)
+            if issue_id in issue_ids:
+                add_relation("topic_issue_declared", "topic", topic["id"], "issue", issue_id)
         for issue_id in topic["activeIssueIds"]:
-            add_relation("topic_issue_active", "topic", topic["id"], "issue", issue_id)
+            if issue_id in issue_ids:
+                add_relation("topic_issue_active", "topic", topic["id"], "issue", issue_id)
         for card_id in topic["relatedCardIds"]:
             add_relation("topic_card_related", "topic", topic["id"], "card", card_id)
         for research_id in topic["relatedResearchIds"]:
@@ -467,6 +516,18 @@ def build_relations(
     for item in research:
         add_relation("research_topic_parent", "research", item["id"], "topic", item.get("topicId") or "")
     article_ids = {item["id"] for item in articles}
+    for owner_type, items in (("issue", issues), ("card", cards), ("research", research)):
+        for item in items:
+            haystack = f"{item.get('id', '')} {item.get('text', '')}"
+            for article_id in article_ids:
+                if article_id in haystack:
+                    add_relation(
+                        f"{owner_type}_article_evidence",
+                        owner_type,
+                        item["id"],
+                        "article",
+                        article_id,
+                    )
     for item in news:
         article_id = item.get("articleId") or ""
         if article_id in article_ids:
@@ -502,9 +563,21 @@ def main() -> None:
 
     research_files = research_candidates(research_root)
     research = [parse_research_report(path) for path in research_files]
+    research_seen: set[str] = set()
+    for item, source_path in zip(research, research_files):
+        if item["id"] in research_seen:
+            item["id"] = f"{item['id']}__{source_path.stem}"
+        research_seen.add(item["id"])
     article_dirs = sorted(path for path in article_root.iterdir() if path.is_dir())
     articles = [parse_article_directory(path) for path in article_dirs]
     news = parse_news_rows(repo_root=repo_root, article_ids={item["id"] for item in articles})
+
+    # Public output keeps only repository-relative references. Absolute local paths
+    # and the workstation root must never be exposed by the public portal.
+    for collection in (issues, cards, research, articles):
+        for item in collection:
+            if item.get("path"):
+                item["path"] = relative_source_ref(str(item["path"]), repo_root)
 
     relate_assets(topics, issues, cards, research, shadow)
 
@@ -551,21 +624,47 @@ def main() -> None:
                 }
                 for item in article_rows
             ],
+            *[
+                {
+                    "id": item["id"],
+                    "type": item["type"],
+                    "title": item["title"],
+                    "topicId": None,
+                    "updatedAt": item["updatedAt"],
+                    "path": "data/news_library/news_library.sqlite3",
+                }
+                for item in news_rows
+            ],
         ]
-    )[:120]
+    )[:360]
+
+    source_fingerprint = {
+        "topics": [(item["id"], item.get("lastUpdated")) for item in topic_rows],
+        "issues": [(item["id"], item.get("updatedAt") or item.get("mtime")) for item in issues],
+        "cards": [(item["id"], item.get("updatedAt") or item.get("mtime")) for item in cards],
+        "research": [(item["id"], item.get("mtime")) for item in research],
+        "articles": [(item["id"], item.get("updatedAt")) for item in article_rows],
+        "news": [(item["id"], item.get("updatedAt"), item.get("status")) for item in news_rows],
+    }
+    source_digest = hashlib.sha256(
+        json.dumps(source_fingerprint, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
     payload = {
         "schemaVersion": PORTAL_SCHEMA_VERSION,
         "generatedAt": datetime.now(tz=timezone.utc).isoformat(),
-        "repoRoot": str(repo_root),
         "schema": schema_descriptor(),
         "buildMeta": {
+            "buildId": source_digest[:16],
+            "sourceDigest": source_digest,
+            "sourceRevision": repo_revision(repo_root),
+            "generatorVersion": "portal-build-v2",
             "generator": "site-demo/scripts/build_site_data.py",
             "sourceRoots": {
-                "index": str(index_root),
-                "research": str(research_root),
-                "articles": str(article_root),
-                "news_db": str(repo_root / "data" / "news_library" / "news_library.sqlite3"),
+                "index": "data/semantic_pipeline_v2/index",
+                "research": "data/semantic_pipeline_v2/research_packs",
+                "articles": "data/semantic_pipeline_v2/articles",
+                "news_db": "data/news_library/news_library.sqlite3",
             },
             "notes": [
                 "Task 01 fixes the unified portal schema and validates the build output against it.",
@@ -601,6 +700,7 @@ def main() -> None:
         "relations": relations,
         "timeline": timeline,
     }
+    payload = sanitize_public_payload(payload, repo_root)
     validate_portal_payload(payload)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

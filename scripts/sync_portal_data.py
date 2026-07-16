@@ -10,6 +10,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from validate_portal_data import validate_portal_file
+
 
 SITE_ROOT = Path(__file__).resolve().parents[1]
 BUILD_SCRIPT = Path(__file__).resolve().with_name("build_site_data.py")
@@ -59,7 +61,27 @@ def summarize_payload(path: Path) -> dict[str, object]:
         "counts": counts,
         "relation_count": len(payload.get("relations", [])),
         "timeline_count": len(payload.get("timeline", [])),
+        "build_id": dict(payload.get("buildMeta") or {}).get("buildId", ""),
+        "source_digest": dict(payload.get("buildMeta") or {}).get("sourceDigest", ""),
     }
+
+
+def validate_count_changes(*, before_path: Path, after_path: Path, max_drop_ratio: float) -> None:
+    if not before_path.exists():
+        return
+    before = summarize_payload(before_path).get("counts", {})
+    after = summarize_payload(after_path).get("counts", {})
+    for name, old_value in dict(before).items():
+        new_value = int(dict(after).get(name, 0))
+        old_value = int(old_value)
+        if old_value <= 0:
+            continue
+        drop_ratio = (old_value - new_value) / old_value
+        if drop_ratio > max_drop_ratio:
+            raise RuntimeError(
+                f"count drop guard rejected {name}: {old_value} -> {new_value} "
+                f"({drop_ratio:.1%} > {max_drop_ratio:.1%})"
+            )
 
 
 def main() -> int:
@@ -68,6 +90,8 @@ def main() -> int:
     )
     parser.add_argument("--repo-root", default="")
     parser.add_argument("--out", default=str(SITE_ROOT / "data" / "site-data.json"))
+    parser.add_argument("--max-count-drop-ratio", type=float, default=0.05)
+    parser.add_argument("--allow-count-drop", action="store_true")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root or str(find_repo_root())).expanduser().resolve()
@@ -84,9 +108,23 @@ def main() -> int:
 
     try:
         run_build(repo_root=repo_root, out_path=temp_path)
+        validation = validate_portal_file(temp_path)
         after_sha = sha256_file(temp_path)
         summary = summarize_payload(temp_path)
-        temp_path.replace(out_path)
+        if not args.allow_count_drop:
+            validate_count_changes(
+                before_path=out_path,
+                after_path=temp_path,
+                max_drop_ratio=max(0.0, args.max_count_drop_ratio),
+            )
+        before_summary = summarize_payload(out_path) if before_exists else {}
+        source_unchanged = bool(before_exists) and (
+            before_summary.get("source_digest") == summary.get("source_digest")
+        )
+        if source_unchanged:
+            after_sha = before_sha
+        else:
+            temp_path.replace(out_path)
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -98,9 +136,11 @@ def main() -> int:
         "out": str(out_path),
         "replaced_existing": before_exists,
         "changed": before_sha != after_sha,
+        "source_unchanged": source_unchanged,
         "before_sha256": before_sha,
         "after_sha256": after_sha,
         **summary,
+        "validation": validation,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

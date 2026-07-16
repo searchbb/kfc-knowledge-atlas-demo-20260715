@@ -84,8 +84,22 @@ def commit_all(*, message: str) -> str:
     return git("rev-parse", "HEAD").stdout.strip()
 
 
-def push_current_branch(branch: str) -> None:
-    subprocess.run(["git", "push", "origin", branch], cwd=SITE_ROOT, check=True, text=True)
+def push_current_branch(branch: str, *, attempts: int, sleep_seconds: int) -> int:
+    last_error = ""
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(
+            ["git", "push", "origin", branch],
+            cwd=SITE_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            return attempt
+        last_error = (result.stderr or result.stdout).strip()
+        if attempt < attempts:
+            time.sleep(max(1, sleep_seconds))
+    raise RuntimeError(f"git push failed after {attempts} attempts: {last_error}")
 
 
 def sha256_bytes(payload: bytes) -> str:
@@ -157,6 +171,8 @@ def main() -> int:
     parser.add_argument("--skip-verify", action="store_true")
     parser.add_argument("--verify-attempts", type=int, default=12)
     parser.add_argument("--verify-sleep-seconds", type=int, default=10)
+    parser.add_argument("--push-attempts", type=int, default=3)
+    parser.add_argument("--push-sleep-seconds", type=int, default=5)
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root or str(find_repo_root())).expanduser().resolve()
@@ -173,8 +189,13 @@ def main() -> int:
     commit_sha = commit_all(message=commit_message)
     committed = bool(changes)
 
+    push_attempt = 0
     if committed and not args.skip_push:
-        push_current_branch(branch)
+        push_attempt = push_current_branch(
+            branch,
+            attempts=max(1, args.push_attempts),
+            sleep_seconds=max(1, args.push_sleep_seconds),
+        )
 
     verify_result: dict[str, object]
     if args.skip_verify:
@@ -199,6 +220,7 @@ def main() -> int:
         "changes_before_commit": changes,
         "committed": committed,
         "pushed": committed and not args.skip_push,
+        "push_attempt": push_attempt,
         "commit_sha": commit_sha,
         "sync_result": sync_result,
         "site_data_summary": site_data_summary,

@@ -1,15 +1,24 @@
-const state = {
-  data: null,
-};
+import { searchRoute, searchSnippetText, searchTopMatches } from "./scripts/search-ranking.mjs";
 
+const state = { data: null, timelineType: "all" };
 const contentEl = document.getElementById("content");
 const statsEl = document.getElementById("stats");
 const topicNavEl = document.getElementById("topic-nav");
 const searchInput = document.getElementById("search-input");
 const searchResults = document.getElementById("search-results");
 
+const ROUTES = {
+  topic: "topics",
+  issue: "issues",
+  card: "cards",
+  research: "research",
+  article: "articles",
+  news: "news",
+};
+
 async function init() {
-  const response = await fetch("./data/site-data.json");
+  const response = await fetch("./data/site-data.json", { cache: "no-store" });
+  if (!response.ok) throw new Error(`数据加载失败（${response.status}）`);
   state.data = normalizeData(await response.json());
   renderStats();
   renderTopicNav();
@@ -33,434 +42,189 @@ function normalizeData(raw) {
   };
 }
 
+function routeHref(type, id = "") {
+  return id ? `#${type}/${encodeURIComponent(id)}` : `#${ROUTES[type] || type}`;
+}
+
 function bindSearch() {
   searchInput.addEventListener("input", () => {
-    const query = searchInput.value.trim().toLowerCase();
-    if (!query) {
-      searchResults.innerHTML = "";
-      return;
-    }
-    const pool = [
-      ...state.data.topics.map((item) => ({ ...item, type: "topic" })),
-      ...state.data.issues,
-      ...state.data.cards,
-      ...state.data.research,
-      ...state.data.articles,
-    ];
-    const matches = pool
-      .map((item) => ({ item, score: searchScore(item, query) }))
-      .filter(({ score }) => score > 0)
-      .sort((left, right) => right.score - left.score)
-      .map(({ item }) => item)
-      .slice(0, 8);
-
+    const query = searchInput.value.trim();
+    if (!query) return (searchResults.innerHTML = "");
+    const matches = searchTopMatches(state.data, query, 10);
     searchResults.innerHTML = matches.length
-      ? matches
-          .map(
-            (item) => `
-              <a class="search-hit" href="#${searchRoute(item)}/${item.id}">
-                <strong>${escapeHtml(item.title)}</strong>
-                <span>${item.type.toUpperCase()} · ${escapeHtml(item.id)} · ${escapeHtml(snippet(searchSnippetText(item), query))}</span>
-              </a>
-            `,
-          )
-          .join("")
-      : `<div class="empty">没有找到匹配项。</div>`;
+      ? matches.map(({ item, snippetText }) => `
+          <a class="search-hit" href="${routeHref(searchRoute(item), item.id)}">
+            <strong>${escapeHtml(item.title)}</strong>
+            <span>${escapeHtml(typeLabel(item.type))} · ${escapeHtml(snippet(snippetText, query))}</span>
+          </a>`).join("")
+      : empty("没有找到匹配项。");
   });
 }
 
 function renderStats() {
   const { stats } = state.data;
   const rows = [
-    ["Topics", stats.topics],
-    ["Issues", stats.issues],
-    ["Cards", stats.cards],
-    ["Research", stats.research],
-    ["Active", stats.activeIssues],
-    ["Provisional", stats.provisionalIssues],
+    ["专题", stats.topics], ["议题", stats.issues], ["知识卡", stats.cards],
+    ["研究", stats.research], ["文章", stats.articles], ["新闻", stats.news],
   ];
-  statsEl.innerHTML = rows
-    .map(
-      ([label, value]) => `
-        <div class="stat">
-          <p class="eyebrow">${label}</p>
-          <strong>${value}</strong>
-        </div>
-      `,
-    )
-    .join("");
+  statsEl.innerHTML = rows.map(([label, value]) => `
+    <a class="stat" href="#${({专题:"topics",议题:"issues",知识卡:"cards",研究:"research",文章:"articles",新闻:"news"})[label]}">
+      <p class="eyebrow">${label}</p><strong>${Number(value || 0).toLocaleString("zh-CN")}</strong>
+    </a>`).join("");
 }
 
 function renderTopicNav() {
-  topicNavEl.innerHTML = state.data.topics
-    .map(
-      (topic) => `
-        <a class="topic-link" href="#topic/${topic.id}">
-          <strong>${escapeHtml(topic.title)}</strong>
-          <div class="meta-strip">
-            <span>${escapeHtml(topic.status)}</span>
-            <span>${topic.activeIssueIds.length} active</span>
-          </div>
-        </a>
-      `,
-    )
-    .join("");
+  topicNavEl.innerHTML = state.data.topics.map((topic) => `
+    <a class="topic-link" href="${routeHref("topic", topic.id)}">
+      <strong>${escapeHtml(topic.title)}</strong>
+      <div class="meta-strip"><span>${escapeHtml(topic.status)}</span><span>${topic.activeIssueIds.length} active</span></div>
+    </a>`).join("");
 }
 
 function renderRoute() {
-  const [route, id] = (window.location.hash.replace(/^#/, "") || "home").split("/");
-  switch (route) {
-    case "topics":
-      renderTopicIndex();
-      break;
-    case "topic":
-      renderTopicDetail(id);
-      break;
-    case "articles":
-      renderAssetIndex("articles", state.data.articles, "Article 详情");
-      break;
-    case "issues":
-      renderAssetIndex("issues", state.data.issues, "Issue 详情");
-      break;
-    case "article":
-      renderArticleDetail(state.data.articles.find((item) => item.id === id));
-      break;
-    case "issue":
-      renderAssetDetail(state.data.issues.find((item) => item.id === id), "Issue");
-      break;
-    case "cards":
-      renderAssetIndex("cards", state.data.cards, "Merged Card 详情");
-      break;
-    case "card":
-      renderAssetDetail(state.data.cards.find((item) => item.id === id), "Card");
-      break;
-    case "research":
-      renderAssetIndex("research", state.data.research, "Research 详情");
-      break;
-    case "researchItem":
-    case "researchitem":
-      renderAssetDetail(state.data.research.find((item) => item.id === id), "Research");
-      break;
-    case "research-detail":
-      renderAssetDetail(state.data.research.find((item) => item.id === id), "Research");
-      break;
-    case "researchpack":
-      renderAssetDetail(state.data.research.find((item) => item.id === id), "Research");
-      break;
-    case "researchdoc":
-      renderAssetDetail(state.data.research.find((item) => item.id === id), "Research");
-      break;
-    case "researches":
-      renderAssetIndex("research", state.data.research, "Research 详情");
-      break;
-    case "timeline":
-      renderTimeline();
-      break;
-    case "home":
-    default:
-      renderHome();
-  }
+  searchResults.innerHTML = "";
+  const [route, encodedId] = (window.location.hash.replace(/^#/, "") || "home").split("/");
+  const id = decodeURIComponent(encodedId || "");
+  if (route === "home") return renderHome();
+  if (route === "timeline") return renderTimeline();
+  if (id && Object.hasOwn(ROUTES, route)) return renderDetail(route, entity(route, id));
+  if (Object.values(ROUTES).includes(route)) return renderAssetIndex(route, state.data[route]);
+  renderMissing();
 }
 
 function renderHome() {
-  const latest = state.data.timeline.slice(0, 8);
-  const hotTopics = state.data.topics
-    .slice()
-    .sort((a, b) => b.activeIssueIds.length - a.activeIssueIds.length)
-    .slice(0, 6);
-
+  const latest = state.data.timeline.slice(0, 10);
+  const hotTopics = state.data.topics.slice().sort((a, b) => b.activeIssueIds.length - a.activeIssueIds.length).slice(0, 6);
+  const meta = state.data.buildMeta || {};
   contentEl.innerHTML = `
-    <div class="grid">
-      <section class="card">
-        <p class="eyebrow">Dashboard</p>
-        <h3>首页读什么</h3>
-        <p>先看 Topic 热区与最近更新时间，再进入具体 Issue / Card / Research 详情。这个 demo 直接把 markdown 细节内容渲染进站点，而不是只停留在 summary 列表。</p>
-        <div class="pill-row">
-          <span class="pill">最新更新 ${escapeHtml(formatTime(state.data.stats.latestUpdate))}</span>
-          <span class="pill">全站搜索已开启</span>
-          <span class="pill">侧边栏固定 Topic 导航</span>
-        </div>
-      </section>
-      <section class="card">
-        <p class="eyebrow">Deployment Notes</p>
-        <h3>演示边界</h3>
-        <p>当前版本聚焦 KFC 正式索引里的 Topic / Issue Card / Merged Card / 关键 Research 报告。它用真实目录生成，不是手写假数据；如果 Martin 点进某个条目，会看到完整 markdown 内容而不是缩略摘要。</p>
-        <div class="pill-row">
-          <span class="pill accent">适合今晚验证 UI/结构/细节粒度</span>
-        </div>
-      </section>
-    </div>
-    <section class="list-panel">
-      <p class="eyebrow">Top Topics</p>
-      <h3>最值得先点开的 Topics</h3>
-      ${hotTopics.map(topicCard).join("")}
+    <section class="detail dashboard-hero">
+      <div><p class="eyebrow">生产知识门户</p><h3>本地资产是唯一真相，网站自动发布只读快照</h3>
+      <p>每次正式资产写入成功后自动重建、校验和发布；异常时不覆盖线上上一版。</p></div>
+      <div class="build-state"><strong>最近同步 ${escapeHtml(formatTime(state.data.generatedAt))}</strong>
+      <span>Build ${escapeHtml(meta.buildId || "-")} · 源版本 ${escapeHtml(meta.sourceRevision || "-")}</span></div>
     </section>
-    <section class="list-panel">
-      <p class="eyebrow">Recent Changes</p>
-      <h3>最近更新时间线</h3>
-      ${latest.map(timelineRow).join("")}
-    </section>
-  `;
-}
-
-function renderTopicIndex() {
-  contentEl.innerHTML = `
-    <section class="list-panel">
-      <p class="eyebrow">Topics</p>
-      <h3>全部 Topic</h3>
-      ${state.data.topics.map(topicCard).join("")}
-    </section>
-  `;
-}
-
-function renderTopicDetail(topicId) {
-  const topic = state.data.topics.find((item) => item.id === topicId);
-  if (!topic) return renderMissing();
-  const issues = state.data.issues.filter((item) => item.topicId === topic.id);
-  const cards = state.data.cards.filter((item) => topic.relatedCardIds.includes(item.id));
-  const research = state.data.research.filter((item) => topic.relatedResearchIds.includes(item.id));
-  contentEl.innerHTML = `
-    <section class="detail">
-      <p class="eyebrow">Topic Detail</p>
-      <h3>${escapeHtml(topic.title)}</h3>
-      <div class="meta-strip">
-        <span>${escapeHtml(topic.id)}</span>
-        <span>${escapeHtml(topic.status)}</span>
-        <span>${topic.activeIssueIds.length} active issues</span>
-        <span>声明 issue 数 ${topic.issueCountDeclared ?? "-"}</span>
-      </div>
-      <p>这个 Topic 下可以直接跳到 Issue 详情；如果站内已有关联的 merged card / research，也会在下面一起展示。</p>
+    <section class="entry-grid">
+      ${entryCard("知识资产", "专题、议题、知识卡和研究成果", "topics")}
+      ${entryCard("文章消化", "查看已入库文章及正式消化状态", "articles")}
+      ${entryCard("新闻获取", "查看新闻库、来源与原文入口", "news")}
     </section>
     <div class="grid">
-      <section class="list-panel">
-        <p class="eyebrow">Issues</p>
-        <h3>Issue 详情入口</h3>
-        ${issues.length ? issues.map((item) => assetRow(item, "issue")).join("") : empty("这个 Topic 暂无 issue。")}
-      </section>
-      <section class="list-panel">
-        <p class="eyebrow">Cards & Research</p>
-        <h3>相关资产</h3>
-        ${cards.map((item) => assetRow(item, "card")).join("") || ""}
-        ${research.map((item) => assetRow(item, "research")).join("") || ""}
-        ${cards.length || research.length ? "" : empty("当前没有自动匹配到关联 merged card 或 research，请用搜索补充查找。")}
-      </section>
-    </div>
-  `;
+      <section class="list-panel"><p class="eyebrow">重点专题</p><h3>当前活跃议题最多</h3>${hotTopics.map(topicCard).join("")}</section>
+      <section class="list-panel"><p class="eyebrow">最近更新</p><h3>跨资产时间线</h3>${latest.map(timelineRow).join("")}</section>
+    </div>`;
 }
 
-function renderAssetIndex(kind, items, heading) {
-  contentEl.innerHTML = `
-    <section class="list-panel">
-      <p class="eyebrow">${kind}</p>
-      <h3>${heading}</h3>
-      ${items.map((item) => assetRow(item, item.type === "research" ? "research" : item.type)).join("")}
-    </section>
-  `;
+function entryCard(title, copy, route) {
+  return `<a class="entry-card" href="#${route}"><p class="eyebrow">入口</p><h3>${title}</h3><p>${copy}</p><span>进入 →</span></a>`;
 }
 
-function renderAssetDetail(item, label) {
+function renderAssetIndex(kind, items) {
+  const sorted = items.slice().sort((a, b) => timestamp(b) - timestamp(a));
+  contentEl.innerHTML = `<section class="list-panel"><p class="eyebrow">${typeLabel(kind.replace(/s$/, ""))}</p>
+    <h3>${typeLabel(kind.replace(/s$/, ""))}（${items.length.toLocaleString("zh-CN")}）</h3>
+    ${sorted.length ? sorted.slice(0, 500).map((item) => assetRow(item)).join("") : empty("暂无数据。")}
+    ${sorted.length > 500 ? `<div class="empty">为保证浏览性能，本页先展示最近 500 条；其余内容可通过全站搜索定位。</div>` : ""}
+  </section>`;
+}
+
+function renderDetail(type, item) {
   if (!item) return renderMissing();
-  const topic = item.topicId ? state.data.topics.find((row) => row.id === item.topicId) : null;
+  const relations = relatedAssets(type, item.id);
+  const canonical = `${location.origin}${location.pathname}${routeHref(type, item.id)}`;
+  const body = item.html || (item.summary ? `<p>${escapeHtml(item.summary)}</p>` : "");
   contentEl.innerHTML = `
     <section class="detail">
-      <p class="eyebrow">${escapeHtml(label)}</p>
-      <h3>${escapeHtml(item.title)}</h3>
+      <div class="detail-title"><div><p class="eyebrow">${typeLabel(type)}详情</p><h3>${escapeHtml(item.title)}</h3></div>
+      <button class="copy-link" data-copy="${escapeHtml(canonical)}">复制稳定链接</button></div>
       <div class="meta-strip">
-        <span>${escapeHtml(item.id)}</span>
-        ${item.status ? `<span>${escapeHtml(item.status)}</span>` : ""}
-        ${item.topicId ? `<span>topic ${escapeHtml(item.topicId)}</span>` : ""}
-        ${item.updatedAt ? `<span>updated ${escapeHtml(item.updatedAt)}</span>` : `<span>mtime ${escapeHtml(formatTime(item.mtime))}</span>`}
-        ${item.sourceArticleCount ? `<span>${item.sourceArticleCount} source articles</span>` : ""}
-      </div>
-      ${
-        item.canonicalQuestion
-          ? `<p><strong>Canonical Question:</strong> ${escapeHtml(item.canonicalQuestion)}</p>`
-          : ""
-      }
-      ${
-        topic
-          ? `<p><a class="pill" href="#topic/${topic.id}">回到 Topic：${escapeHtml(topic.title)}</a></p>`
-          : ""
-      }
-      <article>${item.html}</article>
-    </section>
-  `;
-}
-
-function renderArticleDetail(item) {
-  if (!item) return renderMissing();
-  contentEl.innerHTML = `
-    <section class="detail">
-      <p class="eyebrow">Article</p>
-      <h3>${escapeHtml(item.title)}</h3>
-      <div class="meta-strip">
-        <span>${escapeHtml(item.id)}</span>
-        ${item.status ? `<span>${escapeHtml(item.status)}</span>` : ""}
+        <span>${escapeHtml(item.id)}</span>${item.status ? `<span>${escapeHtml(item.status)}</span>` : ""}
         ${item.sourceId ? `<span>${escapeHtml(item.sourceId)}</span>` : ""}
-        ${item.publishedAt ? `<span>published ${escapeHtml(formatTime(item.publishedAt))}</span>` : ""}
-        ${item.updatedAt ? `<span>updated ${escapeHtml(formatTime(item.updatedAt))}</span>` : ""}
+        ${item.sourceArticleCount != null ? `<span>${item.sourceArticleCount} 篇证据文章</span>` : ""}
+        <span>更新 ${escapeHtml(formatTime(item.updatedAt || item.mtime || item.publishedAt || item.lastUpdated))}</span>
       </div>
-      ${
-        item.summary
-          ? `<p>${escapeHtml(item.summary)}</p>`
-          : `<p>当前 article 未提供 summary，可根据原始来源继续追溯。</p>`
-      }
+      ${item.canonicalQuestion ? `<div class="question"><strong>核心问题</strong><p>${escapeHtml(item.canonicalQuestion)}</p></div>` : ""}
+      ${item.summary ? `<div class="summary"><strong>摘要</strong><p>${escapeHtml(item.summary)}</p></div>` : ""}
       <div class="pill-row">
-        ${
-          item.url
-            ? `<a class="pill" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">打开原始链接</a>`
-            : ""
-        }
-        ${
-          item.path
-            ? `<span class="pill">本地路径：${escapeHtml(item.path)}</span>`
-            : ""
-        }
+        ${item.url ? `<a class="pill" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">查看原文 ↗</a>` : ""}
+        ${item.articleId ? `<a class="pill" href="${routeHref("article", item.articleId)}">查看已消化文章</a>` : ""}
       </div>
     </section>
-  `;
+    ${renderRelations(relations)}
+    ${body ? `<section class="detail"><p class="eyebrow">完整内容</p><article>${body}</article></section>` : ""}`;
+  const button = contentEl.querySelector("[data-copy]");
+  button?.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(button.dataset.copy);
+    button.textContent = "已复制";
+  });
+}
+
+function renderRelations(items) {
+  return `<section class="list-panel relation-panel"><p class="eyebrow">关系导航</p><h3>相关资产（${items.length}）</h3>
+    ${items.length ? `<div class="relation-grid">${items.map(({ item, relation }) => `
+      <a class="relation-node" href="${routeHref(item.type, item.id)}"><span>${typeLabel(item.type)}</span>
+      <strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(relationLabel(relation.type))}</small></a>`).join("")}</div>` : empty("当前尚无可验证的关联资产。")}
+  </section>`;
+}
+
+function relatedAssets(type, id) {
+  const found = [];
+  const seen = new Set();
+  for (const relation of state.data.relations) {
+    let targetType = "", targetId = "";
+    if (relation.fromType === type && relation.fromId === id) [targetType, targetId] = [relation.toType, relation.toId];
+    else if (relation.toType === type && relation.toId === id) [targetType, targetId] = [relation.fromType, relation.fromId];
+    if (!targetId || seen.has(`${targetType}:${targetId}`)) continue;
+    const item = entity(targetType, targetId);
+    if (item) { seen.add(`${targetType}:${targetId}`); found.push({ item: { ...item, type: targetType }, relation }); }
+  }
+  return found.sort((a, b) => typeLabel(a.item.type).localeCompare(typeLabel(b.item.type), "zh-CN"));
 }
 
 function renderTimeline() {
-  contentEl.innerHTML = `
-    <section class="list-panel">
-      <p class="eyebrow">Timeline</p>
-      <h3>按更新时间排序</h3>
-      ${state.data.timeline.map(timelineRow).join("")}
-    </section>
-  `;
+  const types = ["all", "issue", "card", "research", "article", "news"];
+  const filtered = state.timelineType === "all" ? state.data.timeline : state.data.timeline.filter((x) => x.type === state.timelineType);
+  contentEl.innerHTML = `<section class="list-panel"><p class="eyebrow">时间线</p><h3>按更新时间追踪资产变化</h3>
+    <div class="filter-row">${types.map((type) => `<button class="filter ${state.timelineType === type ? "active" : ""}" data-type="${type}">${type === "all" ? "全部" : typeLabel(type)}</button>`).join("")}</div>
+    ${filtered.slice(0, 300).map(timelineRow).join("") || empty("该类型暂无更新。")}</section>`;
+  contentEl.querySelectorAll("[data-type]").forEach((button) => button.addEventListener("click", () => {
+    state.timelineType = button.dataset.type; renderTimeline();
+  }));
 }
 
-function renderMissing() {
-  contentEl.innerHTML = empty("没有找到对应资产。请回到侧边栏或搜索框继续查找。");
+function entity(type, id) {
+  const rows = type === "topic" ? state.data.topics : state.data[ROUTES[type] || `${type}s`] || [];
+  return rows.find((item) => item.id === id);
 }
 
 function topicCard(topic) {
-  return `
-    <a class="list-link" href="#topic/${topic.id}">
-      <strong>${escapeHtml(topic.title)}</strong>
-      <span>${escapeHtml(topic.id)} · ${topic.activeIssueIds.length} active · ${topic.issueCountDeclared ?? "-"} declared</span>
-    </a>
-  `;
+  return `<a class="list-link" href="${routeHref("topic", topic.id)}"><strong>${escapeHtml(topic.title)}</strong>
+    <span>${topic.activeIssueIds.length} 个活跃议题 · ${escapeHtml(topic.status)}</span></a>`;
 }
 
-function assetRow(item, routeType) {
-  const route = routeType === "research" ? "researchpack" : routeType;
-  return `
-    <a class="list-link" href="#${route}/${item.id}">
-      <strong>${escapeHtml(item.title)}</strong>
-      <span>${escapeHtml(item.id)} · ${escapeHtml(item.status || item.type)} · ${escapeHtml((item.canonicalQuestion || "").slice(0, 120))}</span>
-    </a>
-  `;
+function assetRow(item) {
+  return `<a class="list-link" href="${routeHref(item.type || "topic", item.id)}"><strong>${escapeHtml(item.title)}</strong>
+    <span>${escapeHtml(typeLabel(item.type))} · ${escapeHtml(item.status || "")} · ${escapeHtml(formatTime(item.updatedAt || item.mtime || item.publishedAt || item.lastUpdated))}</span></a>`;
 }
 
 function timelineRow(item) {
-  const route = searchRoute(item);
-  return `
-    <a class="list-link" href="#${route}/${item.id}">
-      <strong>${escapeHtml(item.title)}</strong>
-      <span>${escapeHtml(item.type)} · ${escapeHtml(formatTime(item.updatedAt))}</span>
-    </a>
-  `;
+  return `<a class="list-link timeline-row" href="${routeHref(item.type, item.id)}"><span class="type-badge">${typeLabel(item.type)}</span>
+    <strong>${escapeHtml(item.title)}</strong><time>${escapeHtml(formatTime(item.updatedAt))}</time></a>`;
 }
 
-function searchDocument(item) {
-  const parts = [item.title, item.id];
-  if (item.type === "topic") {
-    parts.push(item.status || "");
-    parts.push(...(item.activeIssueIds || []));
-    parts.push(...(item.relatedCardIds || []));
-    parts.push(...(item.relatedResearchIds || []));
-  } else if (item.type === "article") {
-    parts.push(item.summary || "");
-    parts.push(item.sourceId || "");
-    parts.push(item.url || "");
-  } else {
-    parts.push(item.canonicalQuestion || "");
-    parts.push(item.text || "");
-  }
-  return parts.join(" ").toLowerCase();
+function relationLabel(value) {
+  const labels = { topic_issue_declared: "专题声明议题", topic_issue_active: "活跃议题", topic_card_related: "专题关联知识卡", topic_research_related: "专题关联研究", issue_topic_parent: "所属专题", card_topic_parent: "所属专题", research_topic_parent: "所属专题", news_article_materialized: "已形成文章", issue_article_evidence: "议题证据", card_article_evidence: "知识卡证据", research_article_evidence: "研究证据" };
+  return labels[value] || value.replaceAll("_", " ");
 }
 
-function searchScore(item, query) {
-  const title = (item.title || "").toLowerCase();
-  const id = (item.id || "").toLowerCase();
-  const canonicalQuestion = (item.canonicalQuestion || "").toLowerCase();
-  const summary = (item.summary || "").toLowerCase();
-  const text = (item.text || "").toLowerCase();
-  const document = searchDocument(item);
-
-  if (!document.includes(query)) {
-    return 0;
-  }
-
-  let score = typePriority(item.type);
-  if (title === query) score += 200;
-  if (title.includes(query)) score += 120;
-  if (id === query) score += 100;
-  if (id.includes(query)) score += 80;
-  if (canonicalQuestion.includes(query)) score += 60;
-  if (summary.includes(query)) score += 40;
-  if (text.includes(query)) score += 20;
-  return score;
+function typeLabel(type) {
+  return ({ topic:"专题", topics:"专题", issue:"议题", issues:"议题", card:"知识卡", cards:"知识卡", research:"研究", article:"文章", articles:"文章", news:"新闻" })[type] || type || "资产";
 }
 
-function searchSnippetText(item) {
-  if (item.type === "topic") {
-    return [item.title, item.status || "", ...(item.activeIssueIds || [])].join(" ");
-  }
-  if (item.type === "article") {
-    return [item.summary || "", item.sourceId || ""].join(" ");
-  }
-  return item.text || item.canonicalQuestion || item.title || "";
-}
+function renderMissing() { contentEl.innerHTML = empty("没有找到对应资产，请从侧边栏或搜索框继续查找。"); }
+function empty(text) { return `<div class="empty">${escapeHtml(text)}</div>`; }
+function timestamp(item) { const value = Date.parse(item.updatedAt || item.mtime || item.publishedAt || item.lastUpdated || ""); return Number.isFinite(value) ? value : 0; }
+function formatTime(value) { if (!value) return "-"; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN", { hour12: false }); }
+function snippet(text, query) { const value = String(text || ""); const idx = value.toLowerCase().indexOf(query.toLowerCase()); const start = Math.max(0, idx < 0 ? 0 : idx - 28); return value.slice(start, start + 110); }
+function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"); }
 
-function searchRoute(item) {
-  return item.type === "research" ? "researchpack" : item.type;
-}
-
-function typePriority(type) {
-  switch (type) {
-    case "card":
-      return 8;
-    case "research":
-      return 7;
-    case "article":
-      return 6;
-    case "topic":
-      return 5;
-    case "issue":
-      return 4;
-    default:
-      return 0;
-  }
-}
-
-function empty(text) {
-  return `<div class="empty">${escapeHtml(text)}</div>`;
-}
-
-function formatTime(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleString("zh-CN", { hour12: false });
-}
-
-function snippet(text, query) {
-  const lower = text.toLowerCase();
-  const idx = lower.indexOf(query);
-  if (idx < 0) return text.slice(0, 100);
-  const start = Math.max(0, idx - 36);
-  return text.slice(start, start + 120);
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-init().catch((error) => {
-  contentEl.innerHTML = `<div class="empty">站点初始化失败：${escapeHtml(error.message)}</div>`;
-});
+init().catch((error) => { contentEl.innerHTML = `<div class="empty">站点初始化失败：${escapeHtml(error.message)}</div>`; });
