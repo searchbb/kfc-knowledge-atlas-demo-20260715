@@ -1,3 +1,5 @@
 __pycache__/
 assets/.research-staging/
 output/
+intake-worker/.wrangler/
+intake-worker/node_modules/
