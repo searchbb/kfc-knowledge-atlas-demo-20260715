@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import http.client
 import json
 import os
 import subprocess
@@ -194,7 +195,7 @@ def verify_public_site(
                 "remote_styles_sha256": remote_styles_sha,
                 "remote_research_asset_sha256": remote_asset_hashes,
             }
-        except (URLError, ValueError) as exc:
+        except (URLError, ValueError, http.client.IncompleteRead, TimeoutError, OSError) as exc:
             last_error = str(exc)
             if attempt < attempts:
                 time.sleep(max(1, sleep_seconds))
