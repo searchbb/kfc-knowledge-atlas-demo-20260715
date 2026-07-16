@@ -51,7 +51,8 @@ async function runAttempt(browser, profile, attempt) {
     && navigationInteractive
     && siteDataRequests.length === 0
     && indexRequests.length === 0
-    && routeHomeRequests.length === 1
+    // 静态首页不依赖 route-home；app 尚未启动时可以是 0，后台刷新最多 1 次。
+    && routeHomeRequests.length <= 1
     && detailRequests.length >= 1;
   await page.screenshot({
     path: path.join(siteRoot, `output/playwright/performance-${profile.name}-${attempt}.png`),
