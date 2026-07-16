@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 from portal_schema import validate_portal_payload
+from public_release_policy import publication_violations
 
 
 ABSOLUTE_PATH = re.compile(r"(?:/Users/|[A-Za-z]:\\\\)")
@@ -28,6 +29,13 @@ def validate_portal_file(path: Path) -> dict[str, object]:
         if len(ids) != len(set(ids)):
             errors.append(f"{name} contains duplicate ids")
         indexes[entity_type] = set(ids)
+        for row in rows:
+            violations = publication_violations(name, row)
+            if violations:
+                errors.append(
+                    f"{name}:{row.get('id') or '<missing>'} failed public release policy: "
+                    + ",".join(violations)
+                )
         expected = int(dict(payload.get("stats") or {}).get(name, -1))
         if name == "news":
             news_meta = dict(payload.get("newsMeta") or {})

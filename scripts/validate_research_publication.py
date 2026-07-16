@@ -31,10 +31,12 @@ def main() -> int:
     manifest_rows = list(manifest["reports"])
     expected_count = len(manifest_rows)
     assert expected_count > 0
-    assert len(reports) == expected_count, (len(reports), expected_count)
     assert len({row["id"] for row in manifest_rows}) == expected_count
     assert len({row["path"] for row in manifest_rows}) == expected_count
-    assert {row["id"] for row in reports} == {row["id"] for row in manifest_rows}
+    assert {row["id"] for row in reports}.issubset({row["id"] for row in manifest_rows})
+    audit = dict(dict(payload.get("buildMeta") or {}).get("publicationAudit") or {})
+    excluded = int(dict(audit.get("research") or {}).get("excluded") or 0)
+    assert len(reports) + excluded == expected_count, (len(reports), excluded, expected_count)
     for row in manifest_rows:
         lowered = Path(row["path"]).name.lower()
         assert not any(marker in lowered for marker in EXCLUDED_MARKERS), row["path"]

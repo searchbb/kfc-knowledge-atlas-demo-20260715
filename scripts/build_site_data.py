@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import markdown
 from portal_schema import PORTAL_SCHEMA_VERSION, schema_descriptor, validate_portal_payload
+from public_release_policy import partition_public_items
 
 
 TOPIC_SECTION_RE = re.compile(r"^## TOPIC: (?P<title>.+)$", re.MULTILINE)
@@ -600,7 +601,9 @@ def relate_assets(
     issue_map = {issue["id"]: issue for issue in issues}
     for topic in topics:
         if topic.id in shadow:
-            topic.active_issue_ids = [row["issue_id"] for row in shadow[topic.id]]
+            topic.active_issue_ids = [
+                row["issue_id"] for row in shadow[topic.id] if row["issue_id"] in issue_map
+            ]
         else:
             topic.active_issue_ids = [issue_id for issue_id in topic.issue_ids if issue_id in issue_map]
 
@@ -898,24 +901,41 @@ def main() -> None:
         for path in (index_root / "issue_cards").rglob("*.md")
         if ".bak." not in path.name
     )
-    issues = [parse_issue_markdown(path) for path in issue_files]
+    issues, issue_publication_audit = partition_public_items(
+        "issues", [parse_issue_markdown(path) for path in issue_files]
+    )
 
     merged_files = sorted((index_root / "merged_cards").glob("*.md"))
-    cards = [parse_merged_markdown(path) for path in merged_files]
+    cards, card_publication_audit = partition_public_items(
+        "cards", [parse_merged_markdown(path) for path in merged_files]
+    )
 
-    research_sources = research_candidates(repo_root)
+    research_source_items = [
+        {
+            "manifest": row,
+            "path": row["path"],
+            "source_path": str(source_path),
+            "text": source_path.read_text(encoding="utf-8", errors="replace"),
+        }
+        for row, source_path in research_candidates(repo_root)
+    ]
+    public_research_sources, research_publication_audit = partition_public_items(
+        "research", research_source_items
+    )
     research = [
         parse_research_report(
-            source_path,
-            report_id=row["id"],
-            category=row.get("category", "深度研究"),
+            Path(source["source_path"]),
+            report_id=source["manifest"]["id"],
+            category=source["manifest"].get("category", "深度研究"),
             asset_stage_root=research_asset_stage,
-            published_at=str(row.get("published_at") or ""),
+            published_at=str(source["manifest"].get("published_at") or ""),
         )
-        for row, source_path in research_sources
+        for source in public_research_sources
     ]
     article_dirs = sorted(path for path in article_root.iterdir() if path.is_dir())
-    articles = [parse_article_directory(path) for path in article_dirs]
+    articles, article_publication_audit = partition_public_items(
+        "articles", [parse_article_directory(path) for path in article_dirs]
+    )
     news, news_total_count = parse_news_rows(
         repo_root=repo_root,
         article_ids={item["id"] for item in articles},
@@ -1006,7 +1026,15 @@ def main() -> None:
             "notes": [
                 "Research reports are selected through an explicit publication manifest; process artifacts are excluded.",
                 "News is a bounded recent-window projection of the local SQLite source.",
+                "Reader-facing assets pass a public-information provenance gate before publication.",
             ],
+            "publicationAudit": {
+                "policyVersion": 1,
+                "issues": issue_publication_audit,
+                "cards": card_publication_audit,
+                "research": research_publication_audit,
+                "articles": article_publication_audit,
+            },
         },
         "stats": {
             "topics": len(topic_rows),
