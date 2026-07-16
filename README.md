@@ -47,6 +47,11 @@ when `.portal-auto-publish-enabled` exists. It performs the same guarded build,
 push, and remote hash verification used for manual production releases. Failed
 publishes are recorded without removing the last verified online version.
 
+The 10-minute source-sync process dispatches the same hook after a successful
+SQLite commit when new rows were inserted. The public snapshot reads only the
+indexed latest-500 window, and a publish lock serializes concurrent digest/news
+updates. The SQLite database itself is never uploaded.
+
 See `PRODUCTION_RUNBOOK.md` for deep-link rules, relation navigation, rollback,
 and operational checks.
 

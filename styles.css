@@ -270,6 +270,7 @@ a {
 }
 
 .filter.active { background: var(--accent); color: white; }
+.filter-stack { display: grid; gap: 10px; }
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
 
 .question,
@@ -281,8 +282,32 @@ a {
 .relation-node span { color: var(--accent); font-size: .78rem; font-weight: 700; }
 .relation-node small { color: var(--muted); }
 
-.timeline-row { display: grid; grid-template-columns: 75px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.timeline-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 14px; align-items: start; }
+.timeline-kind { display: grid; gap: 8px; align-content: start; }
 .type-badge { color: var(--accent); font-size: .8rem; font-weight: 700; }
+.event-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(13, 122, 98, 0.1);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.event-badge.new {
+  background: rgba(207, 92, 54, 0.12);
+  color: var(--accent-2);
+}
+.timeline-copy {
+  display: grid;
+  gap: 4px;
+}
+.timeline-copy span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
 .timeline-row time { color: var(--muted); font-size: .85rem; }
 
 .card,
@@ -419,6 +444,6 @@ a {
   .dashboard-hero,
   .detail-title { flex-direction: column; }
 
-  .timeline-row { grid-template-columns: 62px minmax(0, 1fr); }
-  .timeline-row time { grid-column: 2; }
+  .timeline-row { grid-template-columns: 1fr; }
+  .timeline-row time { grid-column: auto; }
 }

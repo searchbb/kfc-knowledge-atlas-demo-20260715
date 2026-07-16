@@ -26,6 +26,9 @@ test("all production entrances render real data", async ({ page }) => {
     await expect(page.locator("#content h3").first()).toBeVisible();
     await expect(page.locator("#content")).not.toContainText("站点初始化失败");
   }
+  await page.goto(`${baseURL}#news`);
+  await expect(page.locator("#content h3").first()).toContainText("最近 500 / 总计");
+  await expect(page.locator(".list-link")).toHaveCount(500);
 });
 
 test("all seven detail protocols open the expected asset", async ({ page }) => {

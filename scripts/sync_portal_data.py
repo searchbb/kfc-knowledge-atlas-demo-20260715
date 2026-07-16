@@ -56,9 +56,13 @@ def summarize_payload(path: Path) -> dict[str, object]:
     counts = {
         name: len(rows) for name, rows in collections.items() if isinstance(rows, list)
     }
+    news_meta = dict(payload.get("newsMeta") or {})
+    if news_meta:
+        counts["news"] = int(news_meta.get("totalCount", counts.get("news", 0)))
     return {
         "schema_version": payload.get("schemaVersion", ""),
         "counts": counts,
+        "news_mirrored_count": int(news_meta.get("mirroredCount", len(collections.get("news", [])))),
         "relation_count": len(payload.get("relations", [])),
         "timeline_count": len(payload.get("timeline", [])),
         "build_id": dict(payload.get("buildMeta") or {}).get("buildId", ""),

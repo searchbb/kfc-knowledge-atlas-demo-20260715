@@ -89,7 +89,17 @@ COLLECTION_FIELDS = {
 }
 
 RELATION_FIELDS = ["id", "type", "fromType", "fromId", "toType", "toId"]
-TIMELINE_FIELDS = ["id", "type", "title", "topicId", "updatedAt", "path"]
+TIMELINE_FIELDS = [
+    "id",
+    "type",
+    "title",
+    "topicId",
+    "updatedAt",
+    "path",
+    "eventType",
+    "eventLabel",
+    "sourceStatus",
+]
 
 
 def schema_descriptor() -> dict[str, Any]:

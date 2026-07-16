@@ -6,6 +6,8 @@
 - The public portal is a read-only generated snapshot. It never writes back to local assets.
 - A successful formal asset mutation triggers build, consistency validation, atomic replacement, Git push, and remote SHA-256 verification.
 - A source digest prevents no-op publishes. A collection drop above 5%, an orphan relation, a missing critical field, or a local-path leak stops the release and preserves the previous online version.
+- News is a bounded recent projection, not a full-table static export. See `NEWS_SYNC_ARCHITECTURE.md` for the cursor-based remote API design required for large public history.
+- The 10-minute source-sync process dispatches the portal hook only after its SQLite transaction commits and only when new rows were inserted. Publishers share a filesystem lock, so concurrent digest/news updates cannot race the remote SHA check.
 
 ## Stable URL protocol
 

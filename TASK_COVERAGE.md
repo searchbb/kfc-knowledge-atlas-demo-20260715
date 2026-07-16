@@ -5,7 +5,7 @@ This matrix freezes implementation evidence for all 24 production tasks before t
 | Task | Acceptance evidence | State before release |
 |---|---|---|
 | portal schema | `portal_schema.py`, `validate_portal_data.py` | completed |
-| data adapter | generated `site-data.json`; source counts validated | completed |
+| data adapter | generated `site-data.json`; source counts validated; news uses bounded recent projection | completed |
 | base routes | Playwright opens home plus topic, issue, card, research, article, news routes | implemented, locally passed |
 | topic page | metadata and bidirectional related-assets panel | implemented, locally passed |
 | issue page | canonical question, evidence count, full content, relation panel | implemented, locally passed |
@@ -17,7 +17,7 @@ This matrix freezes implementation evidence for all 24 production tasks before t
 | timeline | normalized mixed timeline and type filters | implemented, locally passed |
 | graph navigation design | normalized relations consumed bidirectionally; documented in runbook | implemented, locally passed |
 | graph navigation UI | relation nodes open the correct detail route | implemented, locally passed |
-| sync script | atomic full rebuild from local truth source | completed |
+| sync script | atomic knowledge build plus bounded/indexed recent-news projection and publish lock | completed |
 | build metadata | build id, source digest/revision, generated time, counts shown | implemented, locally passed |
 | mail URL protocol | `portal_links.py` hash-route contract and runbook | implemented, locally passed |
 | digest mail links | rendered home/article/card links without sending mail | implemented, locally passed |

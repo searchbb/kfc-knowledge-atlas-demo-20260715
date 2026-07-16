@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -173,7 +174,20 @@ def main() -> int:
     parser.add_argument("--verify-sleep-seconds", type=int, default=10)
     parser.add_argument("--push-attempts", type=int, default=3)
     parser.add_argument("--push-sleep-seconds", type=int, default=5)
+    parser.add_argument("--lock-timeout-seconds", type=int, default=300)
     args = parser.parse_args()
+
+    lock_path = SITE_ROOT / ".git" / "portal-publish.lock"
+    lock_handle = lock_path.open("a+", encoding="utf-8")
+    lock_deadline = time.monotonic() + max(1, args.lock_timeout_seconds)
+    while True:
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() >= lock_deadline:
+                raise RuntimeError("timed out waiting for the portal publish lock")
+            time.sleep(1)
 
     repo_root = Path(args.repo_root or str(find_repo_root())).expanduser().resolve()
     sync_result = sync_site_data(repo_root=repo_root, python_bin=args.python_bin)

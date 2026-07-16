@@ -1,6 +1,6 @@
 import { searchRoute, searchSnippetText, searchTopMatches } from "./scripts/search-ranking.mjs";
 
-const state = { data: null, timelineType: "all" };
+const state = { data: null, timelineType: "all", timelineEvent: "all" };
 const contentEl = document.getElementById("content");
 const statsEl = document.getElementById("stats");
 const topicNavEl = document.getElementById("topic-nav");
@@ -120,8 +120,13 @@ function entryCard(title, copy, route) {
 
 function renderAssetIndex(kind, items) {
   const sorted = items.slice().sort((a, b) => timestamp(b) - timestamp(a));
+  const newsMeta = state.data.newsMeta || {};
+  const countLabel = kind === "news"
+    ? `最近 ${Number(newsMeta.mirroredCount || items.length).toLocaleString("zh-CN")} / 总计 ${Number(newsMeta.totalCount || items.length).toLocaleString("zh-CN")}`
+    : items.length.toLocaleString("zh-CN");
   contentEl.innerHTML = `<section class="list-panel"><p class="eyebrow">${typeLabel(kind.replace(/s$/, ""))}</p>
-    <h3>${typeLabel(kind.replace(/s$/, ""))}（${items.length.toLocaleString("zh-CN")}）</h3>
+    <h3>${typeLabel(kind.replace(/s$/, ""))}（${countLabel}）</h3>
+    ${kind === "news" ? `<p>为保证站点长期可用，这里只镜像最近窗口；SQLite 全量历史仍保留在本地，百万级历史检索将由远端数据库 API 提供。</p>` : ""}
     ${sorted.length ? sorted.slice(0, 500).map((item) => assetRow(item)).join("") : empty("暂无数据。")}
     ${sorted.length > 500 ? `<div class="empty">为保证浏览性能，本页先展示最近 500 条；其余内容可通过全站搜索定位。</div>` : ""}
   </section>`;
@@ -182,12 +187,23 @@ function relatedAssets(type, id) {
 
 function renderTimeline() {
   const types = ["all", "issue", "card", "research", "article", "news"];
-  const filtered = state.timelineType === "all" ? state.data.timeline : state.data.timeline.filter((x) => x.type === state.timelineType);
+  const eventTypes = ["all", "new", "updated"];
+  const filtered = state.data.timeline.filter((item) => {
+    const typePass = state.timelineType === "all" || item.type === state.timelineType;
+    const eventPass = state.timelineEvent === "all" || item.eventType === state.timelineEvent;
+    return typePass && eventPass;
+  });
   contentEl.innerHTML = `<section class="list-panel"><p class="eyebrow">时间线</p><h3>按更新时间追踪资产变化</h3>
-    <div class="filter-row">${types.map((type) => `<button class="filter ${state.timelineType === type ? "active" : ""}" data-type="${type}">${type === "all" ? "全部" : typeLabel(type)}</button>`).join("")}</div>
+    <div class="filter-stack">
+      <div class="filter-row">${types.map((type) => `<button class="filter ${state.timelineType === type ? "active" : ""}" data-type="${type}">${type === "all" ? "全部类型" : typeLabel(type)}</button>`).join("")}</div>
+      <div class="filter-row">${eventTypes.map((eventType) => `<button class="filter ${state.timelineEvent === eventType ? "active" : ""}" data-event-type="${eventType}">${timelineEventFilterLabel(eventType)}</button>`).join("")}</div>
+    </div>
     ${filtered.slice(0, 300).map(timelineRow).join("") || empty("该类型暂无更新。")}</section>`;
   contentEl.querySelectorAll("[data-type]").forEach((button) => button.addEventListener("click", () => {
     state.timelineType = button.dataset.type; renderTimeline();
+  }));
+  contentEl.querySelectorAll("[data-event-type]").forEach((button) => button.addEventListener("click", () => {
+    state.timelineEvent = button.dataset.eventType; renderTimeline();
   }));
 }
 
@@ -207,8 +223,40 @@ function assetRow(item) {
 }
 
 function timelineRow(item) {
-  return `<a class="list-link timeline-row" href="${routeHref(item.type, item.id)}"><span class="type-badge">${typeLabel(item.type)}</span>
-    <strong>${escapeHtml(item.title)}</strong><time>${escapeHtml(formatTime(item.updatedAt))}</time></a>`;
+  return `<a class="list-link timeline-row" href="${routeHref(item.type, item.id)}">
+    <div class="timeline-kind">
+      <span class="type-badge">${typeLabel(item.type)}</span>
+      <span class="event-badge ${escapeHtml(item.eventType || "updated")}">${escapeHtml(item.eventLabel || timelineEventFilterLabel(item.eventType || "updated"))}</span>
+    </div>
+    <div class="timeline-copy">
+      <strong>${escapeHtml(item.title)}</strong>
+      <span>${escapeHtml(timelineStatusText(item))}</span>
+    </div>
+    <time>${escapeHtml(formatTime(item.updatedAt))}</time>
+  </a>`;
+}
+
+function timelineEventFilterLabel(value) {
+  return ({ all: "全部事件", new: "新增", updated: "更新" })[value] || value;
+}
+
+function timelineStatusText(item) {
+  const segments = [];
+  if (item.sourceStatus) segments.push(statusLabel(item.sourceStatus));
+  if (item.topicId) segments.push(`专题 ${item.topicId}`);
+  if (!segments.length) segments.push(item.eventType === "new" ? "新增进入统一时间线" : "统一记录最近一次变更");
+  return segments.join(" · ");
+}
+
+function statusLabel(status) {
+  return ({
+    active: "进行中",
+    provisional: "暂存",
+    published: "已发布",
+    digested: "已消化",
+    digest_ready: "Digest 已完成",
+    new: "新入库",
+  })[status] || status;
 }
 
 function relationLabel(value) {

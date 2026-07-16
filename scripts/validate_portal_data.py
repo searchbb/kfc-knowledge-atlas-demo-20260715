@@ -29,7 +29,15 @@ def validate_portal_file(path: Path) -> dict[str, object]:
             errors.append(f"{name} contains duplicate ids")
         indexes[entity_type] = set(ids)
         expected = int(dict(payload.get("stats") or {}).get(name, -1))
-        if expected != len(rows):
+        if name == "news":
+            news_meta = dict(payload.get("newsMeta") or {})
+            if expected != int(news_meta.get("totalCount", -1)):
+                errors.append("stats.news must equal newsMeta.totalCount")
+            if len(rows) != int(news_meta.get("mirroredCount", -1)):
+                errors.append("collections.news must equal newsMeta.mirroredCount")
+            if len(rows) > int(news_meta.get("windowLimit", 0)):
+                errors.append("collections.news exceeds bounded window")
+        elif expected != len(rows):
             errors.append(f"stats.{name}={expected} but collection has {len(rows)}")
 
     orphan_relations = []
@@ -61,6 +69,8 @@ def validate_portal_file(path: Path) -> dict[str, object]:
         "counts": {name: len(rows) for name, rows in collections.items()},
         "relation_count": len(payload.get("relations", [])),
         "timeline_count": len(payload.get("timeline", [])),
+        "news_total_count": dict(payload.get("newsMeta") or {}).get("totalCount", 0),
+        "news_mirrored_count": dict(payload.get("newsMeta") or {}).get("mirroredCount", 0),
         "build_id": build_meta.get("buildId"),
         "absolute_path_leaks": 0,
         "orphan_relations": 0,

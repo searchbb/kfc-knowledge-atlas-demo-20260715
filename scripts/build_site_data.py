@@ -350,7 +350,7 @@ def parse_article_directory(path: Path) -> dict:
     }
 
 
-def parse_news_rows(*, repo_root: Path, article_ids: set[str]) -> list[dict]:
+def parse_news_rows(*, repo_root: Path, article_ids: set[str], limit: int) -> tuple[list[dict], int]:
     db_path = repo_root / "data" / "news_library" / "news_library.sqlite3"
     query = """
         SELECT
@@ -369,11 +369,14 @@ def parse_news_rows(*, repo_root: Path, article_ids: set[str]) -> list[dict]:
             summary_original,
             digest_result_summary
         FROM news_articles
-        ORDER BY COALESCE(NULLIF(published_at, ''), first_seen_at) DESC, article_id
+        WHERE published_at <> ''
+        ORDER BY published_at DESC, article_id
+        LIMIT ?
     """
     with sqlite3.connect(db_path) as connection:
         connection.row_factory = sqlite3.Row
-        rows = connection.execute(query).fetchall()
+        total_count = int(connection.execute("SELECT COUNT(*) FROM news_articles").fetchone()[0])
+        rows = connection.execute(query, (max(1, limit),)).fetchall()
     news_rows: list[dict] = []
     for row in rows:
         article_id = str(row["article_id"])
@@ -391,7 +394,7 @@ def parse_news_rows(*, repo_root: Path, article_ids: set[str]) -> list[dict]:
                 "url": str(row["canonical_url"] or ""),
             }
         )
-    return news_rows
+    return news_rows, total_count
 
 
 def research_candidates(base: Path) -> list[Path]:
@@ -449,12 +452,166 @@ def sort_timeline(items: Iterable[dict]) -> list[dict]:
                 "topicId": item.get("topicId"),
                 "updatedAt": item.get("updatedAt") or item["mtime"],
                 "path": item["path"],
+                "eventType": item.get("eventType") or "updated",
+                "eventLabel": item.get("eventLabel") or "更新",
+                "sourceStatus": item.get("sourceStatus") or "",
             }
             for item in items
         ),
         key=lambda item: item["updatedAt"] or "",
         reverse=True,
     )
+
+
+def timeline_event(
+    *,
+    item: dict,
+    timestamp: str,
+    event_type: str,
+    event_label: str,
+    path: str | None = None,
+) -> dict:
+    return {
+        "id": item["id"],
+        "type": item["type"],
+        "title": item["title"],
+        "topicId": item.get("topicId"),
+        "updatedAt": timestamp,
+        "path": path or item["path"],
+        "eventType": event_type,
+        "eventLabel": event_label,
+        "sourceStatus": str(item.get("status") or ""),
+    }
+
+
+def append_event(events: list[dict], event: dict) -> None:
+    if not event.get("updatedAt"):
+        return
+    dedupe_key = (
+        event["id"],
+        event["type"],
+        event["eventType"],
+        event["updatedAt"],
+    )
+    if any(
+        (
+            item["id"],
+            item["type"],
+            item.get("eventType"),
+            item.get("updatedAt"),
+        )
+        == dedupe_key
+        for item in events
+    ):
+        return
+    events.append(event)
+
+
+def build_timeline(issues: list[dict], cards: list[dict], research: list[dict], articles: list[dict], news_rows: list[dict]) -> list[dict]:
+    events: list[dict] = []
+
+    for item in [*issues, *cards, *research]:
+        created_at = first_nonempty(str(item.get("createdAt") or ""), str(item.get("mtime") or ""))
+        updated_at = first_nonempty(str(item.get("updatedAt") or ""), str(item.get("mtime") or ""))
+        append_event(
+            events,
+            timeline_event(
+                item=item,
+                timestamp=created_at,
+                event_type="new",
+                event_label="新增资产",
+            ),
+        )
+        if updated_at and updated_at != created_at:
+            append_event(
+                events,
+                timeline_event(
+                    item=item,
+                    timestamp=updated_at,
+                    event_type="updated",
+                    event_label="资产更新",
+                ),
+            )
+
+    for item in articles:
+        published_at = first_nonempty(str(item.get("publishedAt") or ""), str(item.get("updatedAt") or ""))
+        updated_at = first_nonempty(str(item.get("updatedAt") or ""), published_at)
+        append_event(
+            events,
+            timeline_event(
+                item=item,
+                timestamp=published_at,
+                event_type="new",
+                event_label="新文章入库",
+            ),
+        )
+        if updated_at and updated_at != published_at:
+            append_event(
+                events,
+                timeline_event(
+                    item=item,
+                    timestamp=updated_at,
+                    event_type="updated",
+                    event_label="文章状态更新" if item.get("status") != "digested" else "完成正式消化",
+                ),
+            )
+
+    for item in news_rows:
+        published_at = first_nonempty(str(item.get("publishedAt") or ""), str(item.get("updatedAt") or ""))
+        updated_at = first_nonempty(str(item.get("updatedAt") or ""), published_at)
+        news_path = "data/news_library/news_library.sqlite3"
+        append_event(
+            events,
+            timeline_event(
+                item=item,
+                timestamp=published_at,
+                event_type="new",
+                event_label="新新闻入库",
+                path=news_path,
+            ),
+        )
+        if updated_at and updated_at != published_at:
+            append_event(
+                events,
+                timeline_event(
+                    item=item,
+                    timestamp=updated_at,
+                    event_type="updated",
+                    event_label="状态更新" if item.get("status") != "digested" else "同步为已消化",
+                    path=news_path,
+                ),
+            )
+
+    return rebalance_timeline(sort_timeline(events), limit=360)
+
+
+def rebalance_timeline(items: list[dict], *, limit: int) -> list[dict]:
+    per_type_caps = {
+        "news": 180,
+        "article": 90,
+        "issue": 30,
+        "card": 30,
+        "research": 30,
+    }
+    picked: list[dict] = []
+    used_by_type = {key: 0 for key in per_type_caps}
+    overflow: list[dict] = []
+
+    for item in items:
+        item_type = str(item.get("type") or "")
+        cap = per_type_caps.get(item_type, limit)
+        if used_by_type.get(item_type, 0) < cap:
+            picked.append(item)
+            used_by_type[item_type] = used_by_type.get(item_type, 0) + 1
+        else:
+            overflow.append(item)
+
+    for item in overflow:
+        if len(picked) >= limit:
+            break
+        picked.append(item)
+
+    return picked[:limit]
 
 
 def build_relations(
@@ -540,6 +697,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--news-window", type=int, default=500)
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
@@ -570,7 +728,11 @@ def main() -> None:
         research_seen.add(item["id"])
     article_dirs = sorted(path for path in article_root.iterdir() if path.is_dir())
     articles = [parse_article_directory(path) for path in article_dirs]
-    news = parse_news_rows(repo_root=repo_root, article_ids={item["id"] for item in articles})
+    news, news_total_count = parse_news_rows(
+        repo_root=repo_root,
+        article_ids={item["id"] for item in articles},
+        limit=max(1, args.news_window),
+    )
 
     # Public output keeps only repository-relative references. Absolute local paths
     # and the workstation root must never be exposed by the public portal.
@@ -608,35 +770,7 @@ def main() -> None:
     article_rows = articles
     news_rows = news
     relations = build_relations(topic_rows, issues, cards, research, article_rows, news_rows)
-    timeline = sort_timeline(
-        [
-            *issues,
-            *cards,
-            *research,
-            *[
-                {
-                    "id": item["id"],
-                    "type": item["type"],
-                    "title": item["title"],
-                    "topicId": None,
-                    "updatedAt": item["updatedAt"],
-                    "path": item["path"],
-                }
-                for item in article_rows
-            ],
-            *[
-                {
-                    "id": item["id"],
-                    "type": item["type"],
-                    "title": item["title"],
-                    "topicId": None,
-                    "updatedAt": item["updatedAt"],
-                    "path": "data/news_library/news_library.sqlite3",
-                }
-                for item in news_rows
-            ],
-        ]
-    )[:360]
+    timeline = build_timeline(issues, cards, research, article_rows, news_rows)
 
     source_fingerprint = {
         "topics": [(item["id"], item.get("lastUpdated")) for item in topic_rows],
@@ -645,6 +779,7 @@ def main() -> None:
         "research": [(item["id"], item.get("mtime")) for item in research],
         "articles": [(item["id"], item.get("updatedAt")) for item in article_rows],
         "news": [(item["id"], item.get("updatedAt"), item.get("status")) for item in news_rows],
+        "newsTotalCount": news_total_count,
     }
     source_digest = hashlib.sha256(
         json.dumps(source_fingerprint, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -677,7 +812,7 @@ def main() -> None:
             "cards": len(cards),
             "research": len(research),
             "articles": len(article_rows),
-            "news": len(news_rows),
+            "news": news_total_count,
             "relations": len(relations),
             "activeIssues": active_issues,
             "provisionalIssues": provisional_issues,
@@ -691,12 +826,15 @@ def main() -> None:
             "articles": article_rows,
             "news": news_rows,
         },
-        "topics": topic_rows,
-        "issues": issues,
-        "cards": cards,
-        "research": research,
-        "articles": article_rows,
-        "news": news_rows,
+        "newsMeta": {
+            "strategy": "bounded_recent_window",
+            "totalCount": news_total_count,
+            "mirroredCount": len(news_rows),
+            "windowLimit": max(1, args.news_window),
+            "newestUpdatedAt": news_rows[0].get("updatedAt") if news_rows else "",
+            "oldestPublishedAt": news_rows[-1].get("publishedAt") if news_rows else "",
+            "scaleBoundary": "Full historical search requires a remote database/API; GitHub Pages only mirrors the recent window.",
+        },
         "relations": relations,
         "timeline": timeline,
     }
