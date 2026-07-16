@@ -116,23 +116,36 @@ def verify_public_site(
     *,
     pages_url: str,
     expected_site_data_sha: str,
+    expected_index_sha: str,
+    expected_app_js_sha: str,
     attempts: int,
     sleep_seconds: int,
 ) -> dict[str, object]:
-    index_url = pages_url
-    app_js_url = f"{pages_url.rstrip('/')}/app.js"
-    site_data_url = f"{pages_url.rstrip('/')}/data/site-data.json"
+    cache_key = expected_site_data_sha[:16]
+    index_url = f"{pages_url}?verify={cache_key}"
+    app_js_url = f"{pages_url.rstrip('/')}/app.js?verify={cache_key}"
+    site_data_url = f"{pages_url.rstrip('/')}/data/site-data.json?verify={cache_key}"
     last_error = ""
     for attempt in range(1, attempts + 1):
         try:
             index_html = fetch_bytes(index_url)
             app_js = fetch_bytes(app_js_url)
             site_data = fetch_bytes(site_data_url)
+            remote_index_sha = sha256_bytes(index_html)
+            remote_app_js_sha = sha256_bytes(app_js)
             remote_sha = sha256_bytes(site_data)
             if b'<script type="module" src="./app.js"></script>' not in index_html:
                 raise ValueError("index.html does not reference app.js")
             if b'fetch("./data/site-data.json"' not in app_js:
                 raise ValueError("app.js does not fetch site-data.json")
+            if remote_index_sha != expected_index_sha:
+                raise ValueError(
+                    f"remote index sha mismatch: expected {expected_index_sha}, got {remote_index_sha}"
+                )
+            if remote_app_js_sha != expected_app_js_sha:
+                raise ValueError(
+                    f"remote app.js sha mismatch: expected {expected_app_js_sha}, got {remote_app_js_sha}"
+                )
             if remote_sha != expected_site_data_sha:
                 raise ValueError(
                     f"remote site-data sha mismatch: expected {expected_site_data_sha}, got {remote_sha}"
@@ -144,6 +157,8 @@ def verify_public_site(
                 "app_js_url": app_js_url,
                 "site_data_url": site_data_url,
                 "remote_site_data_sha256": remote_sha,
+                "remote_index_sha256": remote_index_sha,
+                "remote_app_js_sha256": remote_app_js_sha,
             }
         except (URLError, ValueError) as exc:
             last_error = str(exc)
@@ -193,6 +208,8 @@ def main() -> int:
     sync_result = sync_site_data(repo_root=repo_root, python_bin=args.python_bin)
     site_data_path = SITE_ROOT / "data" / "site-data.json"
     site_data_sha = sha256_file(site_data_path)
+    index_sha = sha256_file(SITE_ROOT / "index.html")
+    app_js_sha = sha256_file(SITE_ROOT / "app.js")
     site_data_summary = summarize_payload(site_data_path)
     branch = current_branch()
     remote_url = origin_url()
@@ -218,6 +235,8 @@ def main() -> int:
         verify_result = verify_public_site(
             pages_url=pages_url,
             expected_site_data_sha=site_data_sha,
+            expected_index_sha=index_sha,
+            expected_app_js_sha=app_js_sha,
             attempts=max(1, args.verify_attempts),
             sleep_seconds=max(1, args.verify_sleep_seconds),
         )
@@ -239,6 +258,8 @@ def main() -> int:
         "sync_result": sync_result,
         "site_data_summary": site_data_summary,
         "site_data_sha256": site_data_sha,
+        "index_sha256": index_sha,
+        "app_js_sha256": app_js_sha,
         "verify": verify_result,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))

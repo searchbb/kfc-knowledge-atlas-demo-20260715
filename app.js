@@ -17,12 +17,14 @@ const ROUTES = {
 };
 
 async function init() {
+  searchInput.disabled = true;
   const response = await fetch("./data/site-data.json", { cache: "no-store" });
   if (!response.ok) throw new Error(`数据加载失败（${response.status}）`);
   state.data = normalizeData(await response.json());
   renderStats();
   renderTopicNav();
   bindSearch();
+  searchInput.disabled = false;
   window.addEventListener("hashchange", renderRoute);
   renderRoute();
 }
