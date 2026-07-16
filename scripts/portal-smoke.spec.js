@@ -38,8 +38,8 @@ test("public framing, Chinese navigation, and news-first ordering are correct", 
   await expect(page.locator(".nav a").first()).toHaveAttribute("href", "#news");
   await expect(page.locator(".nav")).toContainText("深度研究");
   await expect(page.locator(".nav")).toContainText("专题观察");
-  await expect(page.locator(".nav")).toContainText("议题追踪");
   await expect(page.locator(".nav")).toContainText("分析卡片");
+  await expect(page.locator(".nav")).toContainText("综合研判");
   await expect(page.locator("body")).not.toContainText("知识资产门户");
   await expect(page.locator("body")).not.toContainText("公开可访问");
   await expect(page.locator(".lead-story")).toBeVisible();
@@ -52,6 +52,24 @@ test("all seven detail protocols open the expected asset", async ({ page }) => {
     await expect(page.locator("#content h3").first()).toHaveText(item.title);
     await expect(page.locator("button.copy-link")).toBeVisible();
   }
+});
+
+test("analysis cards are fully localized and visually structured", async ({ page }) => {
+  const item = data.issues.find((row) => row.id === "ic_code_graph_change_risk_governance")
+    || data.issues.find((row) => row.status === "active")
+    || data.issues[0];
+  await page.goto(`${baseURL}#issue/${encodeURIComponent(item.id)}`);
+  await expect(page.locator(".analysis-card-body")).toBeVisible();
+  await expect(page.locator(".analysis-section.analysis-question")).toBeVisible();
+  await expect(page.locator(".analysis-section.analysis-evidence")).toBeVisible();
+  await expect(page.locator(".analysis-section.analysis-risks")).toBeVisible();
+  const body = page.locator(".analysis-card-body");
+  await expect(body).toContainText("核心问题");
+  await expect(body).toContainText("关键证据");
+  await expect(body).not.toContainText("Canonical Question");
+  await expect(body).not.toContainText("Key Evidence");
+  await expect(body).not.toContainText("representative_claims");
+  await expect(body).not.toContainText("why_important");
 });
 
 test("search ranking, relation navigation, and timeline filters work", async ({ page }) => {

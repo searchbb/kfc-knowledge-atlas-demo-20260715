@@ -37,7 +37,7 @@ def main() -> int:
         raise SystemExit("legacy public framing found: " + "; ".join(violations))
     index = (SITE_ROOT / "index.html").read_text(encoding="utf-8")
     assert "<title>AI 资讯观察</title>" in index
-    ordered = ["新闻资讯", "深度研究", "专题观察", "议题追踪", "分析卡片", "文章解读", "更新记录", "首页"]
+    ordered = ["新闻资讯", "深度研究", "专题观察", "分析卡片", "综合研判", "文章解读", "更新记录", "首页"]
     positions = [index.index(label) for label in ordered]
     assert positions == sorted(positions), positions
     print(json.dumps({"status": "passed", "checked_files": len(FILES), "legacy_phrases": 0, "first_navigation": "新闻资讯"}, ensure_ascii=False, indent=2))

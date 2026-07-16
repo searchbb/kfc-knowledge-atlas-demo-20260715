@@ -69,8 +69,8 @@ function renderStats() {
     ["新闻资讯", stats.news, "news"],
     ["深度研究", stats.research, "research"],
     ["专题观察", stats.topics, "topics"],
-    ["议题追踪", stats.issues, "issues"],
-    ["分析卡片", stats.cards, "cards"],
+    ["分析卡片", stats.issues, "issues"],
+    ["综合研判", stats.cards, "cards"],
     ["文章解读", stats.articles, "articles"],
   ];
   statsEl.innerHTML = rows.map(([label, value, route]) => `
@@ -179,7 +179,52 @@ function renderDetail(type, item) {
     await navigator.clipboard.writeText(button.dataset.copy);
     button.textContent = "已复制";
   });
+  if (type === "issue" || type === "card") {
+    decorateAnalysisCard(contentEl.querySelector(".report-body article"));
+  }
   void renderMermaidDiagrams(contentEl);
+}
+
+function decorateAnalysisCard(article) {
+  if (!article) return;
+  article.classList.add("analysis-card-body");
+  const englishHeadings = {
+    "基本信息": "Metadata",
+    "核心问题": "Canonical Question",
+    "为什么重要": "Why It Matters",
+    "当前观点": "Current Viewpoints",
+    "关键证据": "Key Evidence",
+    "作用机制": "Mechanisms",
+    "风险与不确定性": "Risks / Uncertainties",
+    "相关文章": "Related Articles",
+    "已归档或替换": "Archived / Replaced",
+    "退役记录": "Retire Record",
+  };
+  const sectionClasses = {
+    "基本信息": "analysis-meta",
+    "核心问题": "analysis-question",
+    "为什么重要": "analysis-importance",
+    "当前观点": "analysis-viewpoints",
+    "关键证据": "analysis-evidence",
+    "作用机制": "analysis-mechanisms",
+    "风险与不确定性": "analysis-risks",
+    "相关文章": "analysis-related",
+    "已归档或替换": "analysis-archive",
+    "退役记录": "analysis-archive",
+  };
+  const fragment = document.createDocumentFragment();
+  let section = null;
+  for (const node of [...article.children]) {
+    if (node.tagName === "H2") {
+      const label = node.textContent.trim();
+      section = document.createElement("section");
+      section.className = `analysis-section ${sectionClasses[label] || "analysis-general"}`;
+      if (englishHeadings[label]) node.title = englishHeadings[label];
+      fragment.append(section);
+    }
+    (section || fragment).append(node);
+  }
+  article.replaceChildren(fragment);
 }
 
 async function renderMermaidDiagrams(root) {
@@ -254,7 +299,7 @@ function timelineStatusText(item) { return item.sourceStatus ? statusLabel(item.
 function sourceLabel(value) { return String(value || "公开信息").replace(/^www\./, ""); }
 function statusLabel(status) { return ({ active: "持续关注", provisional: "观察中", published: "已发布", digested: "已解读", digest_ready: "已完成解读", new: "最新入库", raw: "待解读" })[status] || status || ""; }
 function relationLabel(value) { return ({ topic_issue_declared: "所属专题", topic_issue_active: "持续跟踪", topic_card_related: "相关分析", topic_research_related: "相关研究", issue_topic_parent: "所属专题", card_topic_parent: "所属专题", research_topic_parent: "所属专题", news_article_materialized: "已形成解读", issue_article_evidence: "参考文章", card_article_evidence: "参考文章", research_article_evidence: "参考文章" })[value] || "相关内容"; }
-function typeLabel(type) { return ({ topic: "专题观察", topics: "专题观察", issue: "议题追踪", issues: "议题追踪", card: "分析卡片", cards: "分析卡片", research: "深度研究", article: "文章解读", articles: "文章解读", news: "新闻资讯" })[type] || type || "内容"; }
+function typeLabel(type) { return ({ topic: "专题观察", topics: "专题观察", issue: "分析卡片", issues: "分析卡片", card: "综合研判", cards: "综合研判", research: "深度研究", article: "文章解读", articles: "文章解读", news: "新闻资讯" })[type] || type || "内容"; }
 function renderMissing() { contentEl.innerHTML = empty("没有找到对应内容，请从左侧栏目或搜索框继续查找。"); }
 function empty(text) { return `<div class="empty">${escapeHtml(text)}</div>`; }
 function timestamp(item) { const value = Date.parse(item.publishedAt || item.updatedAt || item.mtime || item.lastUpdated || ""); return Number.isFinite(value) ? value : 0; }

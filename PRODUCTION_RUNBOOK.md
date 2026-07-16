@@ -13,8 +13,8 @@
 站点使用以下 hash 路由：
 
 - `#topic/<id>`：专题观察
-- `#issue/<id>`：议题追踪
-- `#card/<id>`：分析卡片
+- `#issue/<id>`：分析卡片（正式流水线更新的 Issue Card）
+- `#card/<id>`：综合研判
 - `#research/<id>`：深度研究
 - `#article/<id>`：文章解读
 - `#news/<id>`：新闻资讯

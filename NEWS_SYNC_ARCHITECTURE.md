@@ -9,6 +9,12 @@ rows) plus `newsMeta.totalCount`, cursor timestamps, and the public fields neede
 for recent browsing. Structured analysis and curated research remain separate,
 comparatively small snapshots.
 
+Every live 30-minute digest cycle refreshes this bounded projection before it
+sends the reader briefing. The publish step is idempotent: unchanged input
+creates no commit, but the currently deployed hashes are still verified. If
+build, push, or external verification fails, the briefing is blocked rather
+than linking to a knowingly stale snapshot.
+
 ## Production path for large history
 
 When public full-history access is required, the supported architecture is:

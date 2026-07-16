@@ -35,6 +35,80 @@ MARKDOWN_IMAGE_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<target>[^)]+)\)")
 SITE_ROOT = Path(__file__).resolve().parents[1]
 RESEARCH_MANIFEST = Path(__file__).resolve().with_name("research_publication_manifest.json")
 
+CARD_HEADING_LABELS = {
+    "Metadata": "基本信息",
+    "Canonical Question": "核心问题",
+    "Why It Matters": "为什么重要",
+    "Current Viewpoints": "当前观点",
+    "Key Evidence": "关键证据",
+    "Mechanisms": "作用机制",
+    "Risks / Uncertainties": "风险与不确定性",
+    "Risks & Uncertainties": "风险与不确定性",
+    "Related Articles": "相关文章",
+    "Archived / Replaced": "已归档或替换",
+    "Retire Record": "退役记录",
+    "Former Canonical Question": "原核心问题",
+    "Why This Was Migrated": "迁移原因",
+    "Capsule Role": "卡片作用",
+    "Supporting Evidence Viewpoints": "补充证据观点",
+    "Mechanism Notes": "机制说明",
+    "Migration Notes": "迁移说明",
+    "Future Merge Candidates": "后续合并候选",
+    "Supporting Evidence Archive": "补充证据档案",
+    "Briefing-Derived Pending Mechanisms": "简报提取的待验证机制",
+    "Deferred Recovery Rule": "延后恢复规则",
+    "Governance Note": "治理说明",
+    "Status": "状态",
+    "Summary": "摘要",
+    "Stance": "判断立场",
+    "Evidence": "证据",
+    "Viewpoints": "观点",
+    "Quarantine Note": "隔离说明",
+    "Retired Incomplete Audit Capsule": "已退役的不完整审计档案",
+    "Retired No-Evidence Audit Capsule": "已退役的无证据审计档案",
+    "Department Strategy Relevance": "与部门策略的关联",
+    "Recovery Status": "恢复状态",
+    "Linked Article IDs": "关联文章编号",
+    "Original Truncated Fragment": "原始截断片段",
+    "Provisional Triage Note": "临时分流说明",
+}
+CARD_FIELD_LABELS = {
+    "issue_card_id": "卡片编号",
+    "topic_id": "所属专题",
+    "status": "状态",
+    "created_at": "创建时间",
+    "updated_at": "更新时间",
+    "source_article_count": "参考文章数量",
+    "last_update_article_id": "最近更新文章",
+    "representative_claims": "代表性主张",
+    "claim": "主张",
+    "article_id": "文章编号",
+    "evidence_refs": "证据编号",
+    "why_kept": "保留理由",
+    "evidence_ref": "证据编号",
+    "excerpt": "证据摘录",
+    "why_important": "重要性",
+    "title": "标题",
+    "chain": "作用链路",
+    "evidence": "证据",
+    "articles": "相关文章",
+    "role": "材料作用",
+    "old_claim": "原主张",
+    "replaced_by": "替代内容",
+    "reason": "原因",
+    "retired_at": "退役时间",
+    "merge_target": "合并目标",
+}
+CARD_VALUE_LABELS = {
+    "active": "持续关注",
+    "provisional": "观察中",
+    "retired": "已退役",
+    "retired_merged": "已合并退役",
+    "primary": "主要材料",
+    "supporting": "补充材料",
+    "none": "无",
+}
+
 
 @dataclass
 class Topic:
@@ -109,6 +183,47 @@ def render_markdown(text: str) -> str:
         extensions=["extra", "fenced_code", "tables", "sane_lists", "toc"],
         output_format="html5",
     )
+
+
+def localize_analysis_card(raw: str) -> str:
+    """Translate the public rendering without mutating canonical Markdown."""
+    localized = re.sub(r"^#\s+Issue Card:\s*", "# 分析卡片：", raw, flags=re.MULTILINE)
+    localized = re.sub(r"^#\s+Evidence Capsule:\s*", "# 分析卡片（证据档案）：", localized, flags=re.MULTILINE | re.IGNORECASE)
+    localized = re.sub(r"^#\s+Incomplete Issue Card Capsule:\s*", "# 分析卡片（待完善）：", localized, flags=re.MULTILINE | re.IGNORECASE)
+    for source, label in CARD_HEADING_LABELS.items():
+        localized = re.sub(
+            rf"^(##\s+){re.escape(source)}\s*$",
+            rf"\1{label}",
+            localized,
+            flags=re.MULTILINE | re.IGNORECASE,
+        )
+    localized = re.sub(
+        r"^(###\s+)Viewpoint\s+(\d+)\s*:\s*",
+        r"\1观点 \2：",
+        localized,
+        flags=re.MULTILINE | re.IGNORECASE,
+    )
+    localized = re.sub(
+        r"^(###\s+)Viewpoint\s*:\s*",
+        r"\1观点：",
+        localized,
+        flags=re.MULTILINE | re.IGNORECASE,
+    )
+    field_pattern = re.compile(
+        r"^(?P<indent>\s*)(?P<bullet>-\s+)?(?P<key>"
+        + "|".join(re.escape(key) for key in sorted(CARD_FIELD_LABELS, key=len, reverse=True))
+        + r")\s*:\s*(?P<value>.*)$",
+        re.MULTILINE | re.IGNORECASE,
+    )
+
+    def replace_field(match: re.Match[str]) -> str:
+        key = match.group("key").lower()
+        value = match.group("value").strip()
+        value = CARD_VALUE_LABELS.get(value.lower(), value)
+        label = CARD_FIELD_LABELS[key]
+        return f"{match.group('indent')}{match.group('bullet') or ''}**{label}：** {value}".rstrip()
+
+    return field_pattern.sub(replace_field, localized)
 
 
 def read_json(path: Path) -> dict:
@@ -243,7 +358,7 @@ def parse_issue_markdown(path: Path) -> dict:
     title = title_match.group("title").strip() if title_match else path.stem
     fields = {m.group("key"): m.group("value").strip() for m in FIELD_RE.finditer(raw)}
     question = section_body(raw, "Canonical Question").split("\n\n")[0].strip()
-    html = render_markdown(raw)
+    html = render_markdown(localize_analysis_card(raw))
     return {
         "id": fields.get("issue_card_id", path.stem),
         "type": "issue",
@@ -267,7 +382,7 @@ def parse_merged_markdown(path: Path) -> dict:
     title = title_match.group("title").strip() if title_match else path.stem
     fields = {m.group("key"): m.group("value").strip() for m in FIELD_RE.finditer(raw)}
     question = section_body(raw, "Canonical Question").split("\n\n")[0].strip()
-    html = render_markdown(raw)
+    html = render_markdown(localize_analysis_card(raw))
     return {
         "id": fields.get("issue_card_id", path.stem),
         "type": "card",
@@ -845,7 +960,7 @@ def main() -> None:
 
     source_fingerprint = {
         "generator": {
-            "version": "ai-signals-build-v3",
+            "version": "ai-signals-build-v4",
             "build_site_data_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "research_manifest_sha256": hashlib.sha256(RESEARCH_MANIFEST.read_bytes()).hexdigest(),
         },
@@ -877,7 +992,7 @@ def main() -> None:
             "buildId": source_digest[:16],
             "sourceDigest": source_digest,
             "sourceRevision": repo_revision(repo_root),
-            "generatorVersion": "ai-signals-build-v3",
+            "generatorVersion": "ai-signals-build-v4",
             "generator": "site-demo/scripts/build_site_data.py",
             "sourceRoots": {
                 "index": "data/semantic_pipeline_v2/index",
