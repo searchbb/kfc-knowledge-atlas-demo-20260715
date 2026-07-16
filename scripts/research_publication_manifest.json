@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "description": "Curated final research outputs suitable for the public-information analysis site. Process prompts, evidence ledgers, drafts, and review notes are intentionally excluded.",
+  "reports": [
+    {"id": "ai-cloud-competition-aws", "path": "research/aws_research_report_visual_enhanced_final.md", "category": "厂商观察"},
+    {"id": "ai-cloud-competition-ibm", "path": "research/ibm_research/ibm_research_report_visual_enhanced_final.md", "category": "厂商观察"},
+    {"id": "agent-runtime-trustworthy-execution", "path": "research/agent_runtime_trustworthy_execution_report.md", "category": "技术趋势"},
+    {"id": "department-topic-01-hardware-value-upshift", "path": "research/department_strategy/topic_01_hardware_value_upshift/report.md", "category": "产业趋势"},
+    {"id": "department-topic-02-model-resource-competition", "path": "research/department_strategy/topic_02_model_resource_competition/topic_02_model_resource_competition_report.md", "category": "产业趋势"},
+    {"id": "department-topic-03-maas-token-economics", "path": "research/department_strategy/topic_03_maas_routing_token_economics/topic_03_maas_routing_token_economics.md", "category": "商业观察"},
+    {"id": "department-topic-04-clouddc-operations", "path": "research/department_strategy/topic_04_clouddc_asset_operations/topic04_clouddc_report_visual_enhanced.md", "category": "产业趋势"},
+    {"id": "department-topic-05-hybrid-cloud", "path": "research/department_strategy/topic_05_public_private_hybrid_cloud/topic_05_public_private_hybrid_cloud_report_visual_enhanced.md", "category": "产业趋势"},
+    {"id": "department-topic-06-agent-ecosystem", "path": "research/department_strategy/topic_06_agent_ecosystem_enterprise_entry/topic_06_agent_ecosystem_enterprise_entry.md", "category": "技术趋势"},
+    {"id": "department-topic-07-public-cloud-hardware", "path": "research/department_strategy/topic_07_public_cloud_hardware_value_realization/topic_07_public_cloud_hardware_value_realization.md", "category": "产业趋势"},
+    {"id": "department-topic-08-national-livelihood-cloud", "path": "research/department_strategy/topic_08_hybrid_cloud_national_livelihood_agentization/topic_08_hybrid_cloud_national_livelihood_agentization_report_v2_final.md", "category": "行业观察"},
+    {"id": "department-topic-09-agentic-cloud", "path": "research/department_strategy/topic_09_agentic_cloud_technical_high_ground/topic_09_agentic_cloud_technical_high_ground.md", "category": "技术趋势"},
+    {"id": "department-topic-10-partner-ecosystem", "path": "research/department_strategy/topic_10_sales_service_partner_battle_formation/report.md", "category": "生态观察"},
+    {"id": "agentarts-industry-ecosystem", "path": "data/semantic_pipeline_v2/research_packs/agentarts_seminar_20260629/agentarts_seminar_report_visual_enhanced.md", "category": "行业观察"},
+    {"id": "ai-cloud-agent-token-economy", "path": "data/semantic_pipeline_v2/research_packs/ai_cloud_agent_token_economy/ai_cloud_agent_token_economy_report_v1_1.md", "category": "商业观察"},
+    {"id": "ai-cloud-value-reconstruction", "path": "data/semantic_pipeline_v2/research_packs/ai_cloud_value_reconstruction_20260612/final_report.md", "category": "产业趋势"},
+    {"id": "cloud-hardware-monetization", "path": "data/semantic_pipeline_v2/research_packs/hw_cloud_hw_monetization_research_report_20250623.md", "category": "商业观察"},
+    {"id": "agent-era-2035", "path": "data/semantic_pipeline_v2/research_packs/research_report_2035_agent_final.md", "category": "趋势前瞻"},
+    {"id": "cloud-vendor-competition", "path": "data/semantic_pipeline_v2/research_packs/research_report_cloud_vendor_competition_final.md", "category": "厂商观察"}
+  ]
+}

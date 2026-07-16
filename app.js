@@ -1,6 +1,6 @@
-import { searchRoute, searchSnippetText, searchTopMatches } from "./scripts/search-ranking.mjs";
+import { searchRoute, searchTopMatches } from "./scripts/search-ranking.mjs";
 
-const state = { data: null, timelineType: "all", timelineEvent: "all" };
+const state = { data: null, timelineType: "all", timelineEvent: "all", mermaid: null };
 const contentEl = document.getElementById("content");
 const statsEl = document.getElementById("stats");
 const topicNavEl = document.getElementById("topic-nav");
@@ -59,19 +59,23 @@ function bindSearch() {
             <strong>${escapeHtml(item.title)}</strong>
             <span>${escapeHtml(typeLabel(item.type))} · ${escapeHtml(snippet(snippetText, query))}</span>
           </a>`).join("")
-      : empty("没有找到匹配项。");
+      : empty("没有找到匹配内容。");
   });
 }
 
 function renderStats() {
   const { stats } = state.data;
   const rows = [
-    ["专题", stats.topics], ["议题", stats.issues], ["知识卡", stats.cards],
-    ["研究", stats.research], ["文章", stats.articles], ["新闻", stats.news],
+    ["新闻资讯", stats.news, "news"],
+    ["深度研究", stats.research, "research"],
+    ["专题观察", stats.topics, "topics"],
+    ["议题追踪", stats.issues, "issues"],
+    ["分析卡片", stats.cards, "cards"],
+    ["文章解读", stats.articles, "articles"],
   ];
-  statsEl.innerHTML = rows.map(([label, value]) => `
-    <a class="stat" href="#${({专题:"topics",议题:"issues",知识卡:"cards",研究:"research",文章:"articles",新闻:"news"})[label]}">
-      <p class="eyebrow">${label}</p><strong>${Number(value || 0).toLocaleString("zh-CN")}</strong>
+  statsEl.innerHTML = rows.map(([label, value, route]) => `
+    <a class="stat" href="#${route}">
+      <p>${label}</p><strong>${Number(value || 0).toLocaleString("zh-CN")}</strong>
     </a>`).join("");
 }
 
@@ -79,7 +83,7 @@ function renderTopicNav() {
   topicNavEl.innerHTML = state.data.topics.map((topic) => `
     <a class="topic-link" href="${routeHref("topic", topic.id)}">
       <strong>${escapeHtml(topic.title)}</strong>
-      <div class="meta-strip"><span>${escapeHtml(topic.status)}</span><span>${topic.activeIssueIds.length} active</span></div>
+      <div class="meta-strip"><span>${escapeHtml(statusLabel(topic.status))}</span><span>${topic.activeIssueIds.length} 个议题</span></div>
     </a>`).join("");
 }
 
@@ -87,6 +91,7 @@ function renderRoute() {
   searchResults.innerHTML = "";
   const [route, encodedId] = (window.location.hash.replace(/^#/, "") || "home").split("/");
   const id = decodeURIComponent(encodedId || "");
+  setActiveNav(route);
   if (route === "home") return renderHome();
   if (route === "timeline") return renderTimeline();
   if (id && Object.hasOwn(ROUTES, route)) return renderDetail(route, entity(route, id));
@@ -94,44 +99,54 @@ function renderRoute() {
   renderMissing();
 }
 
-function renderHome() {
-  const latest = state.data.timeline.slice(0, 10);
-  const hotTopics = state.data.topics.slice().sort((a, b) => b.activeIssueIds.length - a.activeIssueIds.length).slice(0, 6);
-  const meta = state.data.buildMeta || {};
-  contentEl.innerHTML = `
-    <section class="detail dashboard-hero">
-      <div><p class="eyebrow">生产知识门户</p><h3>本地资产是唯一真相，网站自动发布只读快照</h3>
-      <p>每次正式资产写入成功后自动重建、校验和发布；异常时不覆盖线上上一版。</p></div>
-      <div class="build-state"><strong>最近同步 ${escapeHtml(formatTime(state.data.generatedAt))}</strong>
-      <span>Build ${escapeHtml(meta.buildId || "-")} · 源版本 ${escapeHtml(meta.sourceRevision || "-")}</span></div>
-    </section>
-    <section class="entry-grid">
-      ${entryCard("知识资产", "专题、议题、知识卡和研究成果", "topics")}
-      ${entryCard("文章消化", "查看已入库文章及正式消化状态", "articles")}
-      ${entryCard("新闻获取", "查看新闻库、来源与原文入口", "news")}
-    </section>
-    <div class="grid">
-      <section class="list-panel"><p class="eyebrow">重点专题</p><h3>当前活跃议题最多</h3>${hotTopics.map(topicCard).join("")}</section>
-      <section class="list-panel"><p class="eyebrow">最近更新</p><h3>跨资产时间线</h3>${latest.map(timelineRow).join("")}</section>
-    </div>`;
+function setActiveNav(route) {
+  const listRoute = ROUTES[route] || route;
+  document.querySelectorAll(".nav a").forEach((link) => {
+    link.classList.toggle("active", link.getAttribute("href") === `#${listRoute}`);
+  });
 }
 
-function entryCard(title, copy, route) {
-  return `<a class="entry-card" href="#${route}"><p class="eyebrow">入口</p><h3>${title}</h3><p>${copy}</p><span>进入 →</span></a>`;
+function renderHome() {
+  const latestNews = state.data.news.slice().sort((a, b) => timestamp(b) - timestamp(a)).slice(0, 9);
+  const latestResearch = state.data.research.slice().sort((a, b) => timestamp(b) - timestamp(a)).slice(0, 6);
+  const [lead, ...briefs] = latestNews;
+  contentEl.innerHTML = `
+    <section class="news-front">
+      <div class="section-heading"><div><p class="eyebrow">今日关注</p><h3>最新 AI 资讯</h3></div><a href="#news">查看全部新闻 →</a></div>
+      <div class="lead-grid">
+        ${lead ? `<a class="lead-story" href="${routeHref("news", lead.id)}"><span class="news-label">头条</span><h3>${escapeHtml(lead.title)}</h3><p>${escapeHtml(lead.summary || "来自公开信息源的最新动态。")}</p><time>${escapeHtml(formatTime(lead.publishedAt || lead.updatedAt))}</time></a>` : empty("暂无新闻。")}
+        <div class="brief-list">${briefs.map(newsBrief).join("")}</div>
+      </div>
+    </section>
+    <section class="research-front">
+      <div class="section-heading"><div><p class="eyebrow">趋势与洞察</p><h3>深度研究</h3></div><a href="#research">查看全部 ${state.data.research.length} 份研究 →</a></div>
+      <div class="research-grid">${latestResearch.map(researchCard).join("")}</div>
+    </section>`;
+}
+
+function newsBrief(item, index) {
+  return `<a class="news-brief" href="${routeHref("news", item.id)}"><span>${String(index + 2).padStart(2, "0")}</span><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(sourceLabel(item.sourceId))} · ${escapeHtml(formatDate(item.publishedAt || item.updatedAt))}</small></div></a>`;
+}
+
+function researchCard(item) {
+  return `<a class="research-card" href="${routeHref("research", item.id)}"><span>${escapeHtml(item.category || "深度研究")}</span><h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.summary || "")}</p><small>${Number(item.diagramCount || 0) ? `${Number(item.diagramCount)} 张图表 · ` : ""}${escapeHtml(formatDate(item.updatedAt || item.mtime))}</small></a>`;
 }
 
 function renderAssetIndex(kind, items) {
   const sorted = items.slice().sort((a, b) => timestamp(b) - timestamp(a));
   const newsMeta = state.data.newsMeta || {};
   const countLabel = kind === "news"
-    ? `最近 ${Number(newsMeta.mirroredCount || items.length).toLocaleString("zh-CN")} / 总计 ${Number(newsMeta.totalCount || items.length).toLocaleString("zh-CN")}`
-    : items.length.toLocaleString("zh-CN");
-  contentEl.innerHTML = `<section class="list-panel"><p class="eyebrow">${typeLabel(kind.replace(/s$/, ""))}</p>
-    <h3>${typeLabel(kind.replace(/s$/, ""))}（${countLabel}）</h3>
-    ${kind === "news" ? `<p>为保证站点长期可用，这里只镜像最近窗口；SQLite 全量历史仍保留在本地，百万级历史检索将由远端数据库 API 提供。</p>` : ""}
-    ${sorted.length ? sorted.slice(0, 500).map((item) => assetRow(item)).join("") : empty("暂无数据。")}
-    ${sorted.length > 500 ? `<div class="empty">为保证浏览性能，本页先展示最近 500 条；其余内容可通过全站搜索定位。</div>` : ""}
-  </section>`;
+    ? `最近 ${Number(newsMeta.mirroredCount || items.length).toLocaleString("zh-CN")} 条 / 累计 ${Number(newsMeta.totalCount || items.length).toLocaleString("zh-CN")} 条`
+    : `${items.length.toLocaleString("zh-CN")} 项`;
+  const intro = kind === "news"
+    ? "按发布时间展示最近资讯，原始信息均来自公开来源。"
+    : kind === "research"
+      ? "这里仅收录正式研究成品，不包含提示词、草稿、素材账本和审阅过程。"
+      : "按最近更新时间排列。";
+  const rows = kind === "research"
+    ? `<div class="research-grid research-index">${sorted.map(researchCard).join("")}</div>`
+    : `<div class="editorial-list">${sorted.slice(0, 500).map((item) => assetRow(item)).join("")}</div>`;
+  contentEl.innerHTML = `<section class="list-panel index-page"><div class="section-heading"><div><p class="eyebrow">${typeLabel(kind)}</p><h3>${typeLabel(kind)} <small>${countLabel}</small></h3></div></div><p class="index-intro">${intro}</p>${rows || empty("暂无内容。")}</section>`;
 }
 
 function renderDetail(type, item) {
@@ -140,37 +155,62 @@ function renderDetail(type, item) {
   const canonical = `${location.origin}${location.pathname}${routeHref(type, item.id)}`;
   const body = item.html || (item.summary ? `<p>${escapeHtml(item.summary)}</p>` : "");
   contentEl.innerHTML = `
-    <section class="detail">
-      <div class="detail-title"><div><p class="eyebrow">${typeLabel(type)}详情</p><h3>${escapeHtml(item.title)}</h3></div>
-      <button class="copy-link" data-copy="${escapeHtml(canonical)}">复制稳定链接</button></div>
+    <section class="detail detail-header">
+      <div class="detail-title"><div><p class="eyebrow">${typeLabel(type)}</p><h3>${escapeHtml(item.title)}</h3></div><button class="copy-link" data-copy="${escapeHtml(canonical)}">复制链接</button></div>
       <div class="meta-strip">
-        <span>${escapeHtml(item.id)}</span>${item.status ? `<span>${escapeHtml(item.status)}</span>` : ""}
-        ${item.sourceId ? `<span>${escapeHtml(item.sourceId)}</span>` : ""}
-        ${item.sourceArticleCount != null ? `<span>${item.sourceArticleCount} 篇证据文章</span>` : ""}
-        <span>更新 ${escapeHtml(formatTime(item.updatedAt || item.mtime || item.publishedAt || item.lastUpdated))}</span>
+        ${item.category ? `<span>${escapeHtml(item.category)}</span>` : ""}
+        ${item.status ? `<span>${escapeHtml(statusLabel(item.status))}</span>` : ""}
+        ${item.sourceId ? `<span>${escapeHtml(sourceLabel(item.sourceId))}</span>` : ""}
+        ${item.sourceArticleCount != null ? `<span>${item.sourceArticleCount} 篇参考文章</span>` : ""}
+        ${item.diagramCount ? `<span>${item.diagramCount} 张图表</span>` : ""}
+        <span>更新于 ${escapeHtml(formatTime(item.updatedAt || item.mtime || item.publishedAt || item.lastUpdated))}</span>
       </div>
       ${item.canonicalQuestion ? `<div class="question"><strong>核心问题</strong><p>${escapeHtml(item.canonicalQuestion)}</p></div>` : ""}
-      ${item.summary ? `<div class="summary"><strong>摘要</strong><p>${escapeHtml(item.summary)}</p></div>` : ""}
+      ${item.summary && type !== "research" ? `<div class="summary"><strong>内容摘要</strong><p>${escapeHtml(item.summary)}</p></div>` : ""}
       <div class="pill-row">
-        ${item.url ? `<a class="pill" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">查看原文 ↗</a>` : ""}
-        ${item.articleId ? `<a class="pill" href="${routeHref("article", item.articleId)}">查看已消化文章</a>` : ""}
+        ${item.url ? `<a class="pill" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">查看公开原文 ↗</a>` : ""}
+        ${item.articleId ? `<a class="pill" href="${routeHref("article", item.articleId)}">查看文章解读</a>` : ""}
       </div>
     </section>
-    ${renderRelations(relations)}
-    ${body ? `<section class="detail"><p class="eyebrow">完整内容</p><article>${body}</article></section>` : ""}`;
+    ${relations.length ? renderRelations(relations) : ""}
+    ${body ? `<section class="detail report-body"><p class="eyebrow">${type === "research" ? "研究正文" : "完整内容"}</p><article>${body}</article></section>` : ""}`;
   const button = contentEl.querySelector("[data-copy]");
   button?.addEventListener("click", async () => {
     await navigator.clipboard.writeText(button.dataset.copy);
     button.textContent = "已复制";
   });
+  void renderMermaidDiagrams(contentEl);
+}
+
+async function renderMermaidDiagrams(root) {
+  const codeBlocks = [...root.querySelectorAll("pre > code.language-mermaid")];
+  if (!codeBlocks.length) return;
+  const nodes = codeBlocks.map((code) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "mermaid-chart";
+    wrapper.textContent = code.textContent;
+    code.parentElement.replaceWith(wrapper);
+    return wrapper;
+  });
+  try {
+    if (!state.mermaid) {
+      const module = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+      state.mermaid = module.default;
+      state.mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "neutral", fontFamily: "Noto Sans SC, PingFang SC, sans-serif" });
+    }
+    await state.mermaid.run({ nodes });
+  } catch (error) {
+    nodes.forEach((node) => {
+      if (!node.querySelector("svg")) {
+        node.classList.add("diagram-fallback");
+        node.insertAdjacentHTML("afterbegin", `<strong>图表暂时无法渲染</strong><small>${escapeHtml(error.message || "未知错误")}</small>`);
+      }
+    });
+  }
 }
 
 function renderRelations(items) {
-  return `<section class="list-panel relation-panel"><p class="eyebrow">关系导航</p><h3>相关资产（${items.length}）</h3>
-    ${items.length ? `<div class="relation-grid">${items.map(({ item, relation }) => `
-      <a class="relation-node" href="${routeHref(item.type, item.id)}"><span>${typeLabel(item.type)}</span>
-      <strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(relationLabel(relation.type))}</small></a>`).join("")}</div>` : empty("当前尚无可验证的关联资产。")}
-  </section>`;
+  return `<section class="list-panel relation-panel"><div class="section-heading"><div><p class="eyebrow">延伸阅读</p><h3>相关内容</h3></div></div><div class="relation-grid">${items.slice(0, 18).map(({ item, relation }) => `<a class="relation-node" href="${routeHref(item.type, item.id)}"><span>${typeLabel(item.type)}</span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(relationLabel(relation.type))}</small></a>`).join("")}</div></section>`;
 }
 
 function relatedAssets(type, id) {
@@ -188,25 +228,12 @@ function relatedAssets(type, id) {
 }
 
 function renderTimeline() {
-  const types = ["all", "issue", "card", "research", "article", "news"];
+  const types = ["all", "news", "research", "article", "issue", "card"];
   const eventTypes = ["all", "new", "updated"];
-  const filtered = state.data.timeline.filter((item) => {
-    const typePass = state.timelineType === "all" || item.type === state.timelineType;
-    const eventPass = state.timelineEvent === "all" || item.eventType === state.timelineEvent;
-    return typePass && eventPass;
-  });
-  contentEl.innerHTML = `<section class="list-panel"><p class="eyebrow">时间线</p><h3>按更新时间追踪资产变化</h3>
-    <div class="filter-stack">
-      <div class="filter-row">${types.map((type) => `<button class="filter ${state.timelineType === type ? "active" : ""}" data-type="${type}">${type === "all" ? "全部类型" : typeLabel(type)}</button>`).join("")}</div>
-      <div class="filter-row">${eventTypes.map((eventType) => `<button class="filter ${state.timelineEvent === eventType ? "active" : ""}" data-event-type="${eventType}">${timelineEventFilterLabel(eventType)}</button>`).join("")}</div>
-    </div>
-    ${filtered.slice(0, 300).map(timelineRow).join("") || empty("该类型暂无更新。")}</section>`;
-  contentEl.querySelectorAll("[data-type]").forEach((button) => button.addEventListener("click", () => {
-    state.timelineType = button.dataset.type; renderTimeline();
-  }));
-  contentEl.querySelectorAll("[data-event-type]").forEach((button) => button.addEventListener("click", () => {
-    state.timelineEvent = button.dataset.eventType; renderTimeline();
-  }));
+  const filtered = state.data.timeline.filter((item) => (state.timelineType === "all" || item.type === state.timelineType) && (state.timelineEvent === "all" || item.eventType === state.timelineEvent));
+  contentEl.innerHTML = `<section class="list-panel index-page"><div class="section-heading"><div><p class="eyebrow">更新记录</p><h3>近期内容变化</h3></div></div><div class="filter-stack"><div class="filter-row">${types.map((type) => `<button class="filter ${state.timelineType === type ? "active" : ""}" data-type="${type}">${type === "all" ? "全部类型" : typeLabel(type)}</button>`).join("")}</div><div class="filter-row">${eventTypes.map((eventType) => `<button class="filter ${state.timelineEvent === eventType ? "active" : ""}" data-event-type="${eventType}">${timelineEventFilterLabel(eventType)}</button>`).join("")}</div></div><div class="editorial-list">${filtered.slice(0, 300).map(timelineRow).join("") || empty("该类型暂无更新。")}</div></section>`;
+  contentEl.querySelectorAll("[data-type]").forEach((button) => button.addEventListener("click", () => { state.timelineType = button.dataset.type; renderTimeline(); }));
+  contentEl.querySelectorAll("[data-event-type]").forEach((button) => button.addEventListener("click", () => { state.timelineEvent = button.dataset.eventType; renderTimeline(); }));
 }
 
 function entity(type, id) {
@@ -214,67 +241,26 @@ function entity(type, id) {
   return rows.find((item) => item.id === id);
 }
 
-function topicCard(topic) {
-  return `<a class="list-link" href="${routeHref("topic", topic.id)}"><strong>${escapeHtml(topic.title)}</strong>
-    <span>${topic.activeIssueIds.length} 个活跃议题 · ${escapeHtml(topic.status)}</span></a>`;
-}
-
 function assetRow(item) {
-  return `<a class="list-link" href="${routeHref(item.type || "topic", item.id)}"><strong>${escapeHtml(item.title)}</strong>
-    <span>${escapeHtml(typeLabel(item.type))} · ${escapeHtml(item.status || "")} · ${escapeHtml(formatTime(item.updatedAt || item.mtime || item.publishedAt || item.lastUpdated))}</span></a>`;
+  return `<a class="list-link" href="${routeHref(item.type || "topic", item.id)}"><div><span class="type-badge">${escapeHtml(typeLabel(item.type))}</span><strong>${escapeHtml(item.title)}</strong></div><span>${escapeHtml(sourceLabel(item.sourceId || statusLabel(item.status || "")))} · ${escapeHtml(formatTime(item.updatedAt || item.mtime || item.publishedAt || item.lastUpdated))}</span></a>`;
 }
 
 function timelineRow(item) {
-  return `<a class="list-link timeline-row" href="${routeHref(item.type, item.id)}">
-    <div class="timeline-kind">
-      <span class="type-badge">${typeLabel(item.type)}</span>
-      <span class="event-badge ${escapeHtml(item.eventType || "updated")}">${escapeHtml(item.eventLabel || timelineEventFilterLabel(item.eventType || "updated"))}</span>
-    </div>
-    <div class="timeline-copy">
-      <strong>${escapeHtml(item.title)}</strong>
-      <span>${escapeHtml(timelineStatusText(item))}</span>
-    </div>
-    <time>${escapeHtml(formatTime(item.updatedAt))}</time>
-  </a>`;
+  return `<a class="list-link timeline-row" href="${routeHref(item.type, item.id)}"><div class="timeline-kind"><span class="type-badge">${typeLabel(item.type)}</span><span class="event-badge ${escapeHtml(item.eventType || "updated")}">${escapeHtml(item.eventLabel || timelineEventFilterLabel(item.eventType || "updated"))}</span></div><div class="timeline-copy"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(timelineStatusText(item))}</span></div><time>${escapeHtml(formatTime(item.updatedAt))}</time></a>`;
 }
 
-function timelineEventFilterLabel(value) {
-  return ({ all: "全部事件", new: "新增", updated: "更新" })[value] || value;
-}
-
-function timelineStatusText(item) {
-  const segments = [];
-  if (item.sourceStatus) segments.push(statusLabel(item.sourceStatus));
-  if (item.topicId) segments.push(`专题 ${item.topicId}`);
-  if (!segments.length) segments.push(item.eventType === "new" ? "新增进入统一时间线" : "统一记录最近一次变更");
-  return segments.join(" · ");
-}
-
-function statusLabel(status) {
-  return ({
-    active: "进行中",
-    provisional: "暂存",
-    published: "已发布",
-    digested: "已消化",
-    digest_ready: "Digest 已完成",
-    new: "新入库",
-  })[status] || status;
-}
-
-function relationLabel(value) {
-  const labels = { topic_issue_declared: "专题声明议题", topic_issue_active: "活跃议题", topic_card_related: "专题关联知识卡", topic_research_related: "专题关联研究", issue_topic_parent: "所属专题", card_topic_parent: "所属专题", research_topic_parent: "所属专题", news_article_materialized: "已形成文章", issue_article_evidence: "议题证据", card_article_evidence: "知识卡证据", research_article_evidence: "研究证据" };
-  return labels[value] || value.replaceAll("_", " ");
-}
-
-function typeLabel(type) {
-  return ({ topic:"专题", topics:"专题", issue:"议题", issues:"议题", card:"知识卡", cards:"知识卡", research:"研究", article:"文章", articles:"文章", news:"新闻" })[type] || type || "资产";
-}
-
-function renderMissing() { contentEl.innerHTML = empty("没有找到对应资产，请从侧边栏或搜索框继续查找。"); }
+function timelineEventFilterLabel(value) { return ({ all: "全部事件", new: "新增", updated: "更新" })[value] || value; }
+function timelineStatusText(item) { return item.sourceStatus ? statusLabel(item.sourceStatus) : (item.eventType === "new" ? "新增内容" : "内容更新"); }
+function sourceLabel(value) { return String(value || "公开信息").replace(/^www\./, ""); }
+function statusLabel(status) { return ({ active: "持续关注", provisional: "观察中", published: "已发布", digested: "已解读", digest_ready: "已完成解读", new: "最新入库", raw: "待解读" })[status] || status || ""; }
+function relationLabel(value) { return ({ topic_issue_declared: "所属专题", topic_issue_active: "持续跟踪", topic_card_related: "相关分析", topic_research_related: "相关研究", issue_topic_parent: "所属专题", card_topic_parent: "所属专题", research_topic_parent: "所属专题", news_article_materialized: "已形成解读", issue_article_evidence: "参考文章", card_article_evidence: "参考文章", research_article_evidence: "参考文章" })[value] || "相关内容"; }
+function typeLabel(type) { return ({ topic: "专题观察", topics: "专题观察", issue: "议题追踪", issues: "议题追踪", card: "分析卡片", cards: "分析卡片", research: "深度研究", article: "文章解读", articles: "文章解读", news: "新闻资讯" })[type] || type || "内容"; }
+function renderMissing() { contentEl.innerHTML = empty("没有找到对应内容，请从左侧栏目或搜索框继续查找。"); }
 function empty(text) { return `<div class="empty">${escapeHtml(text)}</div>`; }
-function timestamp(item) { const value = Date.parse(item.updatedAt || item.mtime || item.publishedAt || item.lastUpdated || ""); return Number.isFinite(value) ? value : 0; }
+function timestamp(item) { const value = Date.parse(item.publishedAt || item.updatedAt || item.mtime || item.lastUpdated || ""); return Number.isFinite(value) ? value : 0; }
 function formatTime(value) { if (!value) return "-"; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN", { hour12: false }); }
+function formatDate(value) { if (!value) return "-"; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }); }
 function snippet(text, query) { const value = String(text || ""); const idx = value.toLowerCase().indexOf(query.toLowerCase()); const start = Math.max(0, idx < 0 ? 0 : idx - 28); return value.slice(start, start + 110); }
 function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"); }
 
-init().catch((error) => { contentEl.innerHTML = `<div class="empty">站点初始化失败：${escapeHtml(error.message)}</div>`; });
+init().catch((error) => { contentEl.innerHTML = `<div class="empty">页面加载失败：${escapeHtml(error.message)}</div>`; });

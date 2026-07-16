@@ -27,8 +27,22 @@ test("all production entrances render real data", async ({ page }) => {
     await expect(page.locator("#content")).not.toContainText("站点初始化失败");
   }
   await page.goto(`${baseURL}#news`);
-  await expect(page.locator("#content h3").first()).toContainText("最近 500 / 总计");
+  await expect(page.locator("#content h3").first()).toContainText("最近 500 条 / 累计");
   await expect(page.locator(".list-link")).toHaveCount(500);
+});
+
+test("public framing, Chinese navigation, and news-first ordering are correct", async ({ page }) => {
+  await page.goto(baseURL);
+  await expect(page).toHaveTitle("AI 资讯观察");
+  await expect(page.locator(".nav a").first()).toHaveText("新闻资讯");
+  await expect(page.locator(".nav a").first()).toHaveAttribute("href", "#news");
+  await expect(page.locator(".nav")).toContainText("深度研究");
+  await expect(page.locator(".nav")).toContainText("专题观察");
+  await expect(page.locator(".nav")).toContainText("议题追踪");
+  await expect(page.locator(".nav")).toContainText("分析卡片");
+  await expect(page.locator("body")).not.toContainText("知识资产门户");
+  await expect(page.locator("body")).not.toContainText("公开可访问");
+  await expect(page.locator(".lead-story")).toBeVisible();
 });
 
 test("all seven detail protocols open the expected asset", async ({ page }) => {
@@ -55,13 +69,29 @@ test("search ranking, relation navigation, and timeline filters work", async ({ 
   await page.locator('[data-type="news"]').click();
   await expect(page.locator(".timeline-row").first()).toBeVisible();
   const labels = await page.locator(".timeline-row .type-badge").allTextContents();
-  expect(labels.every((label) => label === "新闻")).toBeTruthy();
+  expect(labels.every((label) => label === "新闻资讯")).toBeTruthy();
+});
+
+test("all curated research reports open and Mermaid diagrams render as SVG", async ({ page }) => {
+  expect(data.research).toHaveLength(19);
+  const reportsWithDiagrams = data.research.filter((item) => Number(item.diagramCount || 0) > 0);
+  expect(reportsWithDiagrams.length).toBeGreaterThan(0);
+  for (const item of data.research) {
+    await page.goto(`${baseURL}#research/${encodeURIComponent(item.id)}`);
+    await expect(page.locator("#content h3").first()).toHaveText(item.title);
+    await expect(page.locator(".report-body article")).toBeVisible();
+    if (item.diagramCount) {
+      await expect(page.locator(".mermaid-chart svg")).toHaveCount(item.diagramCount, { timeout: 20000 });
+      await expect(page.locator(".diagram-fallback")).toHaveCount(0);
+    }
+  }
 });
 
 test("mobile layout remains readable", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(baseURL);
-  await expect(page.locator("h2")).toContainText("知识资产门户");
-  await expect(page.locator(".entry-card")).toHaveCount(3);
+  await expect(page.locator("h2")).toContainText("AI 资讯观察");
+  await expect(page.locator(".nav a").first()).toHaveText("新闻资讯");
+  await expect(page.locator(".lead-story")).toBeVisible();
   await page.screenshot({ path: path.join(siteRoot, "portal-mobile-smoke.png"), fullPage: true });
 });

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import sqlite3
 import subprocess
 from dataclasses import dataclass
@@ -30,6 +31,9 @@ SHADOW_ISSUE_RE = re.compile(
 )
 FRONT_MATTER_RE = re.compile(r"^---\n(?P<body>.*?)\n---\n", re.DOTALL)
 FRONT_MATTER_KV_RE = re.compile(r"^(?P<key>[A-Za-z0-9_]+):\s*(?P<value>.+)$")
+MARKDOWN_IMAGE_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<target>[^)]+)\)")
+SITE_ROOT = Path(__file__).resolve().parents[1]
+RESEARCH_MANIFEST = Path(__file__).resolve().with_name("research_publication_manifest.json")
 
 
 @dataclass
@@ -275,15 +279,48 @@ def parse_merged_markdown(path: Path) -> dict:
     }
 
 
-def parse_research_report(path: Path) -> dict:
+def stage_research_images(raw: str, *, path: Path, report_id: str, stage_root: Path) -> str:
+    def replace(match: re.Match[str]) -> str:
+        target = match.group("target").strip()
+        if target.startswith("<") and target.endswith(">"):
+            target = target[1:-1]
+        parsed = urlparse(target)
+        if parsed.scheme or target.startswith(("#", "/")):
+            return match.group(0)
+        source = (path.parent / target).resolve()
+        if not source.is_file():
+            return match.group(0)
+        destination = stage_root / report_id / source.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        public_target = f"./assets/research/{report_id}/{source.name}"
+        return f"![{match.group('alt')}]({public_target})"
+
+    return MARKDOWN_IMAGE_RE.sub(replace, raw)
+
+
+def parse_research_report(
+    path: Path,
+    *,
+    report_id: str,
+    category: str,
+    asset_stage_root: Path,
+) -> dict:
     raw = path.read_text(encoding="utf-8")
+    raw = stage_research_images(
+        raw,
+        path=path,
+        report_id=report_id,
+        stage_root=asset_stage_root,
+    )
     header = HEADER_RE.search(raw)
     title = header.group("title").strip() if header else path.parent.name
     html = render_markdown(raw)
     return {
-        "id": path.parent.name,
+        "id": report_id,
         "type": "research",
         "title": title,
+        "category": category,
         "topicId": None,
         "status": "published",
         "updatedAt": None,
@@ -293,6 +330,8 @@ def parse_research_report(path: Path) -> dict:
         "mtime": isoformat_from_mtime(path),
         "html": html,
         "text": plain_text(html),
+        "summary": summarize_markdown(raw),
+        "diagramCount": len(re.findall(r"^```mermaid\s*$", raw, re.MULTILINE | re.IGNORECASE)),
     }
 
 
@@ -397,18 +436,35 @@ def parse_news_rows(*, repo_root: Path, article_ids: set[str], limit: int) -> tu
     return news_rows, total_count
 
 
-def research_candidates(base: Path) -> list[Path]:
-    patterns = {
-        "final_report.md",
-        "report.md",
-        "report_final.md",
-        "report_v2_final.md",
-        "agentarts_seminar_report_final.md",
-    }
-    return sorted(
-        [path for path in base.rglob("*.md") if path.name in patterns],
-        key=lambda item: item.as_posix(),
-    )
+def research_candidates(repo_root: Path) -> list[tuple[dict[str, str], Path]]:
+    manifest = read_json(RESEARCH_MANIFEST)
+    rows = manifest.get("reports") or []
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(f"research publication manifest is empty: {RESEARCH_MANIFEST}")
+    candidates: list[tuple[dict[str, str], Path]] = []
+    seen_ids: set[str] = set()
+    seen_paths: set[Path] = set()
+    for raw_row in rows:
+        row = {str(key): str(value) for key, value in dict(raw_row).items()}
+        report_id = row.get("id", "").strip()
+        relative_path = row.get("path", "").strip()
+        if not report_id or not relative_path:
+            raise ValueError("each research manifest row requires id and path")
+        source_path = (repo_root / relative_path).resolve()
+        try:
+            source_path.relative_to(repo_root)
+        except ValueError as exc:
+            raise ValueError(f"research path escapes repository: {relative_path}") from exc
+        if report_id in seen_ids:
+            raise ValueError(f"duplicate research id in manifest: {report_id}")
+        if source_path in seen_paths:
+            raise ValueError(f"duplicate research path in manifest: {relative_path}")
+        if not source_path.is_file():
+            raise FileNotFoundError(f"research report does not exist: {relative_path}")
+        seen_ids.add(report_id)
+        seen_paths.add(source_path)
+        candidates.append((row, source_path))
+    return candidates
 
 
 def relate_assets(
@@ -703,8 +759,13 @@ def main() -> None:
     repo_root = Path(args.repo_root).resolve()
     out_path = Path(args.out).resolve()
     index_root = repo_root / "data/semantic_pipeline_v2/index"
-    research_root = repo_root / "data/semantic_pipeline_v2/research_packs"
     article_root = repo_root / "data/semantic_pipeline_v2/articles"
+    assets_root = SITE_ROOT / "assets"
+    research_asset_stage = assets_root / ".research-staging"
+    research_asset_final = assets_root / "research"
+    if research_asset_stage.exists():
+        shutil.rmtree(research_asset_stage)
+    research_asset_stage.mkdir(parents=True, exist_ok=True)
 
     topics = parse_topic_registry(index_root / "topic_registry.md")
     shadow = parse_shadow(index_root / "registry_shadow_active_cards.md")
@@ -719,13 +780,16 @@ def main() -> None:
     merged_files = sorted((index_root / "merged_cards").glob("*.md"))
     cards = [parse_merged_markdown(path) for path in merged_files]
 
-    research_files = research_candidates(research_root)
-    research = [parse_research_report(path) for path in research_files]
-    research_seen: set[str] = set()
-    for item, source_path in zip(research, research_files):
-        if item["id"] in research_seen:
-            item["id"] = f"{item['id']}__{source_path.stem}"
-        research_seen.add(item["id"])
+    research_sources = research_candidates(repo_root)
+    research = [
+        parse_research_report(
+            source_path,
+            report_id=row["id"],
+            category=row.get("category", "深度研究"),
+            asset_stage_root=research_asset_stage,
+        )
+        for row, source_path in research_sources
+    ]
     article_dirs = sorted(path for path in article_root.iterdir() if path.is_dir())
     articles = [parse_article_directory(path) for path in article_dirs]
     news, news_total_count = parse_news_rows(
@@ -797,13 +861,14 @@ def main() -> None:
             "generator": "site-demo/scripts/build_site_data.py",
             "sourceRoots": {
                 "index": "data/semantic_pipeline_v2/index",
-                "research": "data/semantic_pipeline_v2/research_packs",
+                "research_manifest": "site-demo/scripts/research_publication_manifest.json",
+                "research": ["research", "data/semantic_pipeline_v2/research_packs"],
                 "articles": "data/semantic_pipeline_v2/articles",
                 "news_db": "data/news_library/news_library.sqlite3",
             },
             "notes": [
-                "Task 01 fixes the unified portal schema and validates the build output against it.",
-                "Task 02 wires article directories and the news library database into first-class portal collections.",
+                "Research reports are selected through an explicit publication manifest; process artifacts are excluded.",
+                "News is a bounded recent-window projection of the local SQLite source.",
             ],
         },
         "stats": {
@@ -840,6 +905,10 @@ def main() -> None:
     }
     payload = sanitize_public_payload(payload, repo_root)
     validate_portal_payload(payload)
+
+    if research_asset_final.exists():
+        shutil.rmtree(research_asset_final)
+    research_asset_stage.replace(research_asset_final)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
