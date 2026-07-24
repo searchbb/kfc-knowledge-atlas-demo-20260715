@@ -531,10 +531,200 @@ function bindResearchIntake() {
   });
 }
 
+const METRIC_NAME_ZH = {
+  revenue: "收入规模",
+  growth: "增长",
+  margin: "利润率与单位经济",
+  profit: "利润",
+  retention: "留存",
+  customers: "客户与用户",
+  token_economics: "Token 单位经济",
+  token_usage: "Token 使用量",
+  compute_efficiency: "算力效率",
+  compute_capacity: "算力容量",
+  capex: "资本开支",
+  unit_cost: "单位成本",
+  pricing: "价格",
+  market_share: "市场份额",
+  adoption: "采用情况",
+};
+
+function humanMetricName(metric) {
+  const family = String(metric.strategic_family || "");
+  const raw = String(metric.display_name || metric.metric_name || "").trim();
+  if (METRIC_NAME_ZH[family]) {
+    const suffix = raw && !/^(revenue|growth|margin|profit|customers?)$/i.test(raw)
+      ? ` · ${raw.replaceAll("_", " ")}`
+      : "";
+    return `${METRIC_NAME_ZH[family]}${suffix}`;
+  }
+  return raw.replaceAll("_", " ") || "战略指标";
+}
+
+function metricValue(metric) {
+  const value = metric.value;
+  let rendered = "";
+  if (typeof value === "number") rendered = value.toLocaleString("zh-CN", { maximumFractionDigits: 3 });
+  else if (value && typeof value === "object") {
+    const min = value.min ?? value.minimum;
+    const max = value.max ?? value.maximum;
+    if (min != null && max != null) rendered = Number(min) === Number(max) ? String(min) : `${min}–${max}`;
+    else if (min != null) rendered = `≥${min}`;
+    else if (max != null) rendered = `≤${max}`;
+    else rendered = Object.values(value).filter((item) => item != null).join("–");
+  } else rendered = String(value ?? "");
+  const unit = String(metric.unit || "").replace("billion_usd", "十亿美元");
+  return `${rendered}${unit ? ` ${unit}` : ""}`.trim() || "—";
+}
+
+function renderEvidenceCard(evidence, label = "查看证据") {
+  if (!evidence || typeof evidence !== "object" || !evidence.evidence_id) return "";
+  const url = String(evidence.source_url || "");
+  return `
+    <details class="evidence-card">
+      <summary>${escapeHtml(label)}</summary>
+      <div>
+        <p><strong>来源</strong>${escapeHtml(evidence.source_name || "公开来源")} · ${escapeHtml(evidence.source_grade || "等级未标注")}</p>
+        <p><strong>发布时间</strong>${escapeHtml(formatTime(evidence.published_at))}</p>
+        <blockquote>${escapeHtml(evidence.source_quote || "原文摘录未公开")}</blockquote>
+        <p><strong>核验</strong>${escapeHtml(evidence.verification_status || "待核验")}</p>
+        ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">查看公开原文 ↗</a>` : ""}
+      </div>
+    </details>`;
+}
+
+function renderEvidenceCards(cards, label = "查看证据") {
+  const rows = Array.isArray(cards) ? cards : [];
+  return rows.map((evidence, index) => renderEvidenceCard(evidence, index ? `补充证据 ${index + 1}` : label)).join("");
+}
+
+function trendDirectionLabel(direction) {
+  return ({ UP: "增强", DOWN: "减弱", FLAT: "基本不变", MIXED: "分化", INSUFFICIENT: "证据不足" })[direction] || "证据不足";
+}
+
+function renderResearchObjectDetail(item, canonical) {
+  const thesis = item.thesis && typeof item.thesis === "object" ? item.thesis : {};
+  const approvedThesis = thesis.review_status === "approved" && thesis.thesis;
+  const metrics = Array.isArray(item.metrics) ? item.metrics : [];
+  const trends = Array.isArray(item.trends) ? item.trends : [];
+  const sections = Array.isArray(item.longTermSections) ? item.longTermSections : [];
+  const relationships = Array.isArray(item.competitiveRelationships) ? item.competitiveRelationships : [];
+  const updates = Array.isArray(item.recentUpdates) ? item.recentUpdates : [];
+  const coverage = item.evidenceCoverage || {};
+  const objectLabel = item.objectType === "archetype" ? "产业范式" : "核心公司";
+  const metricHtml = metrics.length
+    ? metrics.map((metric) => `
+        <article class="object-metric">
+          <p>${escapeHtml(humanMetricName(metric))}</p>
+          <strong>${escapeHtml(metricValue(metric))}</strong>
+          <small>${escapeHtml(metric.effective_period || "时期未标注")}</small>
+          ${renderEvidenceCard(metric.evidence, "Evidence Card")}
+        </article>`).join("")
+    : `<p class="object-empty">暂无满足战略指标准入条件的可靠公开数字。</p>`;
+  const trendHtml = trends.map((trend) => {
+    const approved = trend.review_status === "approved";
+    return `
+      <article class="object-trend ${approved ? "" : "is-missing"}">
+        <div><span>${escapeHtml(trend.label || trend.window_code || "")}</span><b>${escapeHtml(trendDirectionLabel(trend.direction))}</b></div>
+        <h4>${escapeHtml(trend.purpose || "趋势判断")}</h4>
+        <p>${escapeHtml(approved ? trend.summary : "证据不足，尚未形成已审核趋势。")}</p>
+        ${approved && trend.strategic_implication ? `<small>${escapeHtml(trend.strategic_implication)}</small>` : ""}
+        ${renderEvidenceCards(trend.evidence_cards, "趋势证据")}
+      </article>`;
+  }).join("");
+  const sectionHtml = sections
+    .filter((section) => !["snapshot", "key_metrics", "recent_updates", "multi_horizon_trends", "strategic_judgment", "relationships"].includes(section.block_id))
+    .map((section) => {
+      const sectionFacts = Array.isArray(section.facts) ? section.facts : [];
+      const factsHtml = sectionFacts.map((fact) => {
+        const role = fact.asset_role === "watch_candidate"
+          ? "待第二来源验证"
+          : fact.asset_role === "case_observation"
+            ? "典型案例"
+            : "已核事实";
+        return `
+          <article class="object-section-fact">
+            <div><span>${escapeHtml(role)}</span>${fact.effective_period ? `<time>${escapeHtml(fact.effective_period)}</time>` : ""}</div>
+            <p>${escapeHtml(fact.statement || fact.subject || "事实")}</p>
+            ${renderEvidenceCards(fact.evidence_cards, "Evidence Card")}
+          </article>`;
+      }).join("");
+      return `
+        <article class="object-analysis-section">
+          <p class="eyebrow">${escapeHtml(item.objectType === "archetype" ? "产业结构" : "公司结构")}</p>
+          <h3>${escapeHtml(section.title || "长期观察")}</h3>
+          ${section.html || section.markdown ? `<div class="object-markdown">${section.html || `<p>${escapeHtml(section.markdown || "")}</p>`}</div>` : ""}
+          ${factsHtml ? `<div class="object-section-facts">${factsHtml}</div>` : ""}
+          ${renderEvidenceCards(section.evidence_cards, "区块证据")}
+        </article>`;
+    }).join("");
+  const riskItems = Array.isArray(thesis.risks) ? thesis.risks : [];
+  const watchItems = Array.isArray(thesis.watch_items) ? thesis.watch_items : [];
+  const riskHtml = (riskItems.length || watchItems.length)
+    ? `<div class="object-risk-grid">
+        <article><h4>主要风险</h4>${riskItems.length ? `<ul>${riskItems.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>` : "<p>尚未形成已审核风险判断。</p>"}</article>
+        <article><h4>关键观察</h4>${watchItems.length ? `<ul>${watchItems.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>` : "<p>尚未形成已审核观察问题。</p>"}</article>
+      </div>`
+    : `<p class="object-empty">长期综合尚未形成已审核的风险与关键观察。</p>`;
+  const relationshipHtml = relationships.length
+    ? `<div class="object-relationship-grid">${relationships.map((row) => `
+        <article><strong>${escapeHtml(row.competitor_name || row.competitor_object_id)}</strong><span>${escapeHtml(row.relationship_type || "关系")}</span><p>${escapeHtml((row.dimensions || []).join("、"))}</p></article>`).join("")}</div>`
+    : `<p class="object-empty">暂无经审核的竞争、合作或依赖关系。</p>`;
+  const updatesHtml = updates.length
+    ? updates.map((update) => `
+        <article class="object-update">
+          <time>${escapeHtml(formatTime(update.event_date))}</time>
+          <div><strong>${escapeHtml(update.event || "事实更新")}</strong><p>${escapeHtml(update.impact_type || "事实线索")} · ${escapeHtml(update.direction || "NEW_FACTOR")}</p>${renderEvidenceCards(update.evidence_cards || [update.evidence], "查看来源")}</div>
+        </article>`).join("")
+    : `<p class="object-empty">最近 ${Number(item.recentWindowDays || 90)} 天没有可公开的正式更新。</p>`;
+
+  contentEl.innerHTML = `
+    <section class="detail object-profile-header">
+      <div class="detail-title"><div><p class="eyebrow">RESEARCH OBJECT · ${escapeHtml(objectLabel)}</p><h3>${escapeHtml(item.title)}</h3></div><div class="object-header-actions"><a href="#objects">返回对象列表</a><button class="copy-link" data-copy="${escapeHtml(canonical)}">复制链接</button></div></div>
+      <div class="meta-strip">
+        <span>${escapeHtml(objectLabel)}</span>
+        ${item.businessArchetype ? `<span>${escapeHtml(item.businessArchetype)}</span>` : ""}
+        ${item.attentionLevel ? `<span>${escapeHtml(item.attentionLevel)} 级关注</span>` : ""}
+        <span>长期档案更新于 ${escapeHtml(formatTime(item.longTermUpdatedAt || item.updatedAt))}</span>
+      </div>
+      <p class="object-description">${escapeHtml(item.summary || "")}</p>
+      <div class="object-coverage">
+        <span>可追溯事实 <b>${Number(coverage.fact_count || 0)}</b></span>
+        <span>战略指标 <b>${Number(coverage.strategic_metric_count || 0)}</b></span>
+        <span>已审核趋势 <b>${Number(coverage.approved_trend_count || 0)}/3</b></span>
+      </div>
+    </section>
+    <section class="detail object-thesis">
+      <p class="eyebrow">CURRENT VIEW</p>
+      <h3>当前判断</h3>
+      ${approvedThesis
+        ? `<p class="object-thesis-copy">${escapeHtml(thesis.thesis)}</p>${renderEvidenceCards(thesis.evidence_cards, "判断证据")}`
+        : `<p class="object-empty prominent">证据正在积累，尚未形成经审核的长期判断。这里不会用单篇新闻自动编造结论。</p>`}
+    </section>
+    <section class="detail object-section"><div class="object-section-heading"><div><p class="eyebrow">STRATEGIC METRICS</p><h3>关键指标</h3></div><small>只保留可跨期比较、会改变经营或战略位置的数字</small></div><div class="object-metric-grid">${metricHtml}</div></section>
+    <section class="detail object-section"><div class="object-section-heading"><div><p class="eyebrow">MULTI-HORIZON</p><h3>趋势分析</h3></div><small>7 天只作提醒；长期判断分开审核</small></div><div class="object-trend-grid">${trendHtml}</div></section>
+    ${sectionHtml ? `<section class="object-section-stack">${sectionHtml}</section>` : ""}
+    <section class="detail object-section"><div class="object-section-heading"><div><p class="eyebrow">RISKS & WATCH</p><h3>风险与关键观察</h3></div></div>${riskHtml}</section>
+    <section class="detail object-section"><div class="object-section-heading"><div><p class="eyebrow">COMPETITIVE MAP</p><h3>竞争与控制关系</h3></div></div>${relationshipHtml}</section>
+    <details class="detail object-recent">
+      <summary><span><b>近期事实线索</b><small>辅助阅读，不代表长期判断</small></span><strong>${updates.length} 条</strong></summary>
+      <div class="object-update-list">${updatesHtml}</div>
+    </details>`;
+  const button = contentEl.querySelector("[data-copy]");
+  button?.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(button.dataset.copy);
+    button.textContent = "已复制";
+  });
+}
+
 function renderDetail(type, item) {
   if (!item) return renderMissing();
   const relations = relatedAssets(type, item.id);
   const canonical = `${location.origin}${location.pathname}${routeHref(type, item.id)}`;
+  if (type === "object") {
+    renderResearchObjectDetail(item, canonical);
+    return;
+  }
   const body = item.html || (item.summary ? `<p>${escapeHtml(item.summary)}</p>` : "");
   contentEl.innerHTML = `
     <section class="detail detail-header">

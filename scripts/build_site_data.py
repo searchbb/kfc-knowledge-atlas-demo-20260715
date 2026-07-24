@@ -7,6 +7,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -134,6 +135,27 @@ def first_nonempty(*values: str | None) -> str:
         text = str(value).strip()
         if text:
             return text
+    return ""
+
+
+def strategic_fact_family(statement: str) -> str:
+    """Return a conservative display family for obvious duplicate facts."""
+    text = re.sub(r"\s+", " ", str(statement or "")).casefold()
+    families = (
+        ("capex", ("资本开支", "capital expenditure", "capex")),
+        ("funding", ("股票发行", "债券融资", "融资筹集", "funding", "financing")),
+        ("token_throughput", ("每分钟", "token/min", "tokens per minute")),
+        ("gross_margin", ("毛利率", "gross margin")),
+        ("operating_margin", ("经营利润率", "operating margin")),
+        ("revenue", ("收入", "revenue")),
+        ("customer_adoption", ("客户", "企业使用", "adoption")),
+        ("compute_capacity", ("算力容量", "compute capacity", "gw")),
+        ("inference_cost", ("推理成本", "inference cost")),
+        ("token_price", ("token价格", "token price", "单token")),
+    )
+    for family, keywords in families:
+        if any(keyword in text for keyword in keywords):
+            return family
     return ""
 
 
@@ -826,7 +848,19 @@ def parse_canonical_research_objects(*, repo_root: Path) -> list[dict]:
     if not projection_path.exists():
         return []
     payload = json.loads(projection_path.read_text(encoding="utf-8"))
+    backend_root = repo_root / "apps" / "article-workbench" / "backend"
+    for path in (repo_root, backend_root):
+        text = str(path)
+        if text not in sys.path:
+            sys.path.insert(0, text)
+    from app.services.research_object_profile_service import (  # noqa: PLC0415
+        ResearchObjectProfileService,
+    )
+
+    profile_service = ResearchObjectProfileService(repo_root=repo_root)
     evidence_by_id: dict[str, dict] = {}
+    fact_by_id: dict[str, dict] = {}
+    evidence_ids_by_fact: dict[str, list[str]] = {}
     evidence_db = (
         repo_root
         / "data"
@@ -848,58 +882,200 @@ def parse_canonical_research_objects(*, repo_root: Path) -> list[dict]:
                     """
                 ).fetchall()
             }
+            fact_by_id = {
+                str(row["fact_id"]): dict(row)
+                for row in connection.execute(
+                    """
+                    SELECT fact_id, fact_category, fact_subject, statement,
+                           value_json, unit, currency, effective_period,
+                           published_at, source_grade, status, evidence_refs_json
+                    FROM fact_updates
+                    """
+                ).fetchall()
+            }
+            for row in connection.execute(
+                """
+                SELECT fact_id, evidence_id
+                FROM research_metric_observations
+                ORDER BY fact_id, evidence_id
+                """
+            ).fetchall():
+                evidence_ids_by_fact.setdefault(
+                    str(row["fact_id"]),
+                    [],
+                ).append(str(row["evidence_id"]))
     result: list[dict] = []
     for object_id, profile in sorted(dict(payload.get("profiles") or {}).items()):
-        object_data = dict((profile or {}).get("object") or {})
-        updates_24h = select_strategic_object_updates(
-            list(object_data.get("updates_24h") or []),
-            limit=3,
-            object_name=str(object_data.get("name") or ""),
-            object_aliases=[
-                str(item)
-                for item in object_data.get("aliases") or []
+        hydrated = profile_service.get_profile(object_id)
+        object_data = dict(hydrated.get("object") or {})
+        metrics = [
+            dict(item) for item in hydrated.get("metrics") or []
+            if isinstance(item, dict)
+        ]
+        recent_updates = [
+            dict(item) for item in hydrated.get("recent_updates") or []
+            if isinstance(item, dict)
+        ][:10]
+        trends = [
+            {
+                **dict(item),
+                "evidence_cards": [
+                    evidence_by_id[evidence_id]
+                    for evidence_id in item.get("evidence_ids") or []
+                    if evidence_id in evidence_by_id
+                ],
+            }
+            for item in hydrated.get("trends") or []
+            if isinstance(item, dict)
+        ]
+        thesis = dict(hydrated.get("thesis") or {})
+        thesis["evidence_cards"] = [
+            evidence_by_id[evidence_id]
+            for evidence_id in thesis.get("evidence_ids") or []
+            if evidence_id in evidence_by_id
+        ]
+        fact_placements = {
+            str(fact_id): dict(placement)
+            for fact_id, placement in (
+                profile.get("fact_placements") or {}
+            ).items()
+            if isinstance(placement, dict)
+        }
+        long_term_sections: list[dict] = []
+        for raw_block in hydrated.get("blocks") or []:
+            if not isinstance(raw_block, dict):
+                continue
+            data = dict(raw_block.get("data") or {})
+            markdown_text = str(data.get("markdown") or "").strip()
+            reader_text = re.sub(
+                r"^#{1,6}\s+.*$",
+                "",
+                markdown_text,
+                flags=re.MULTILINE,
+            ).strip()
+            if reader_text.startswith("待证据更新"):
+                reader_text = ""
+                markdown_text = ""
+            block_id = str(
+                raw_block.get("block_id") or raw_block.get("id") or ""
+            )
+            section_facts: list[dict] = []
+            for fact_id, placement in fact_placements.items():
+                placement_block_id = str(placement.get("block_id") or "")
+                if not placement_block_id or placement_block_id != block_id:
+                    continue
+                fact = dict(fact_by_id.get(fact_id) or {})
+                if not fact:
+                    continue
+                evidence_ids: list[str] = []
+                for reference in _json_value(
+                    str(fact.get("evidence_refs_json") or ""),
+                    [],
+                ):
+                    if isinstance(reference, dict):
+                        evidence_id = str(
+                            reference.get("ref_id")
+                            or reference.get("evidence_id")
+                            or ""
+                        )
+                    else:
+                        evidence_id = str(reference or "")
+                    if evidence_id:
+                        evidence_ids.append(evidence_id)
+                evidence_ids.extend(evidence_ids_by_fact.get(fact_id, []))
+                evidence_ids = list(dict.fromkeys(evidence_ids))
+                section_facts.append(
+                    {
+                        "fact_id": fact_id,
+                        "subject": str(fact.get("fact_subject") or ""),
+                        "statement": str(fact.get("statement") or ""),
+                        "effective_period": str(
+                            fact.get("effective_period") or ""
+                        ),
+                        "published_at": str(fact.get("published_at") or ""),
+                        "fact_status": str(fact.get("status") or ""),
+                        "asset_role": str(
+                            placement.get("asset_role") or ""
+                        ),
+                        "evidence_cards": [
+                            evidence_by_id[evidence_id]
+                            for evidence_id in evidence_ids
+                            if evidence_id in evidence_by_id
+                        ],
+                    }
+                )
+            section_facts.sort(
+                key=lambda item: str(item.get("published_at") or ""),
+                reverse=True,
+            )
+            section_facts.sort(
+                key=lambda item: {
+                    "core_metric": 0,
+                    "watch_candidate": 1,
+                    "strategic_event": 2,
+                    "confirmed_fact": 3,
+                    "case_observation": 4,
+                }.get(str(item.get("asset_role") or ""), 5),
+            )
+            compressed_facts: list[dict] = []
+            seen_families: set[str] = set()
+            for fact in section_facts:
+                role = str(fact.get("asset_role") or "")
+                family = strategic_fact_family(str(fact.get("statement") or ""))
+                # Watch candidates need side-by-side corroboration, while
+                # case observations remain distinct examples. For other roles,
+                # one current representative per obvious strategic family is
+                # enough for the reader-facing page.
+                if (
+                    family
+                    and role not in {"watch_candidate", "case_observation"}
+                    and family in seen_families
+                ):
+                    continue
+                if family and role not in {"watch_candidate", "case_observation"}:
+                    seen_families.add(family)
+                compressed_facts.append(fact)
+                if len(compressed_facts) >= 6:
+                    break
+            section_facts = compressed_facts
+            if not reader_text and not section_facts:
+                continue
+            evidence_ids = [
+                str(item) for item in raw_block.get("evidence_refs") or []
                 if str(item)
-            ],
-            object_kind=str(object_data.get("kind") or ""),
-        )
+            ]
+            long_term_sections.append(
+                {
+                    "block_id": block_id,
+                    "title": str(raw_block.get("title") or ""),
+                    "block_type": str(raw_block.get("type") or ""),
+                    "markdown": markdown_text,
+                    "html": render_markdown(markdown_text),
+                    "evidence_ids": evidence_ids,
+                    "evidence_cards": [
+                        evidence_by_id[evidence_id]
+                        for evidence_id in evidence_ids
+                        if evidence_id in evidence_by_id
+                    ],
+                    "facts": section_facts,
+                }
+            )
         updates = [
             {
-                "update_id": str(item.get("fact_id") or ""),
+                **item,
+                "update_id": str(item.get("update_id") or item.get("fact_id") or ""),
                 "research_object_id": object_id,
-                "event": str(item.get("statement") or ""),
-                "event_date": str(item.get("published_at") or ""),
-                "review_status": "fact_confirmed",
-                "fact_id": str(item.get("fact_id") or ""),
-                "evidence_id": str(item.get("evidence_id") or ""),
-                "evidence": {
-                    key: evidence_by_id.get(
-                        str(item.get("evidence_id") or ""), {}
-                    ).get(key, "")
-                    for key in (
-                        "source_name",
-                        "source_grade",
-                        "source_url",
-                        "published_at",
-                        "source_quote",
-                        "locator",
-                        "article_id",
-                        "verification_status",
-                    )
-                },
+                "review_status": str(item.get("review_status") or "fact_confirmed"),
             }
-            for item in updates_24h
+            for item in recent_updates
         ]
-        update_html = "".join(
-            (
-                "<section class='value-change'>"
-                f"<h3>{escape(str(item.get('statement') or '研究对象更新'))}</h3>"
-                f"<p><strong>记录时间：</strong>{escape(str(item.get('published_at') or ''))}</p>"
-                f"<p><strong>证据：</strong><a href='{escape(str(evidence_by_id.get(str(item.get('evidence_id') or ''), {}).get('source_url') or ''))}' "
-                "target='_blank' rel='noreferrer'>"
-                f"{escape(str(evidence_by_id.get(str(item.get('evidence_id') or ''), {}).get('source_name') or '公开来源'))} ↗</a></p>"
-                "</section>"
-            )
-            for item in updates_24h
+        approved_trends = sum(
+            str(item.get("review_status") or "") == "approved" for item in trends
+        )
+        strategic_thesis = (
+            str(thesis.get("thesis") or "")
+            if str(thesis.get("review_status") or "") == "approved"
+            else ""
         )
         result.append(
             {
@@ -922,27 +1098,33 @@ def parse_canonical_research_objects(*, repo_root: Path) -> list[dict]:
                 "strategicPosition": str(
                     object_data.get("strategic_position") or ""
                 ),
-                "strategicThesis": "",
+                "strategicThesis": strategic_thesis,
                 "updates": updates,
-                "facts": [
-                    {
-                        **item,
-                        "source_url": str(
-                            evidence_by_id.get(
-                                str(item.get("evidence_id") or ""), {}
-                            ).get("source_url")
-                            or ""
-                        ),
-                        "status": "confirmed",
-                    }
-                    for item in updates_24h
+                "facts": updates,
+                "metrics": metrics,
+                "metricSummary": dict(hydrated.get("metric_summary") or {}),
+                "trends": trends,
+                "thesis": thesis,
+                "competitiveRelationships": [
+                    dict(item)
+                    for item in hydrated.get("competitive_relationships") or []
+                    if isinstance(item, dict)
                 ],
-                "factCount": int(object_data.get("fact_count") or 0),
-                "html": (
-                    f"<p>已积累 {int(object_data.get('fact_count') or 0)} 条可追溯记录；"
-                    "以下仅展示最近24小时中最值得战略关注的更新。</p>"
-                    + (update_html or "<p>尚无最近24小时正式更新记录。</p>")
+                "longTermSections": long_term_sections,
+                "recentUpdates": updates,
+                "recentWindowDays": int(
+                    hydrated.get("recent_window_days") or 90
                 ),
+                "alerts7d": int(hydrated.get("alerts_7d") or 0),
+                "factCount": int(object_data.get("fact_count") or 0),
+                "longTermUpdatedAt": str(object_data.get("updated_at") or ""),
+                "evidenceCoverage": {
+                    "fact_count": int(object_data.get("fact_count") or 0),
+                    "strategic_metric_count": len(metrics),
+                    "approved_trend_count": approved_trends,
+                    "thesis_status": str(thesis.get("review_status") or "missing"),
+                },
+                "html": "",
             }
         )
     return result
@@ -950,6 +1132,8 @@ def parse_canonical_research_objects(*, repo_root: Path) -> list[dict]:
 
 def parse_research_objects(*, repo_root: Path) -> list[dict]:
     canonical_objects = parse_canonical_research_objects(repo_root=repo_root)
+    if canonical_objects:
+        return canonical_objects
     db_path = (
         repo_root
         / "data"
@@ -1072,11 +1256,7 @@ def parse_research_objects(*, repo_root: Path) -> list[dict]:
                 "html": update_html or "<p>尚无正式更新记录。</p>",
             }
         )
-    canonical_ids = {str(item["id"]) for item in canonical_objects}
-    return [
-        *[item for item in result if str(item["id"]) not in canonical_ids],
-        *canonical_objects,
-    ]
+    return result
 
 
 def parse_strategic_signals(*, repo_root: Path) -> list[dict]:
