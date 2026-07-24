@@ -643,6 +643,12 @@ MICRO_OBJECT_TERMS = (
     "health integration",
     "集成预计",
     "面向客户开放",
+    "首轮 token",
+    "单轮 token",
+    "单次 token",
+    "first round token",
+    "评估流水线",
+    "evaluation pipeline",
 )
 STRATEGIC_BLOCK_WEIGHTS = {
     "unit_economics": 60,
@@ -734,7 +740,7 @@ def canonical_update_signature(item: dict) -> tuple[tuple[str, ...], tuple[str, 
 def select_strategic_object_updates(
     updates: list[dict],
     *,
-    limit: int = 4,
+    limit: int = 3,
     object_name: str = "",
     object_aliases: list[str] | None = None,
     object_kind: str = "",
@@ -843,7 +849,7 @@ def parse_canonical_research_objects(*, repo_root: Path) -> list[dict]:
         object_data = dict((profile or {}).get("object") or {})
         updates_24h = select_strategic_object_updates(
             list(object_data.get("updates_24h") or []),
-            limit=4,
+            limit=3,
             object_name=str(object_data.get("name") or ""),
             object_aliases=[
                 str(item)
