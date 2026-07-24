@@ -644,9 +644,13 @@ MICRO_OBJECT_TERMS = (
     "集成预计",
     "面向客户开放",
     "首轮 token",
+    "首轮token",
     "单轮 token",
+    "单轮token",
     "单次 token",
+    "单次token",
     "first round token",
+    "first-round token",
     "评估流水线",
     "evaluation pipeline",
 )
@@ -758,7 +762,7 @@ def select_strategic_object_updates(
         reverse=True,
     )
     for item in ranked:
-        if canonical_update_score(item) < 40:
+        if canonical_update_score(item) < 55:
             continue
         statement_text = str(item.get("statement") or "")
         lowered = statement_text.lower()
